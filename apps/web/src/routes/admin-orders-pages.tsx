@@ -1,6 +1,7 @@
 import { streamed } from "../lib/streamed.ts";
 import {
   type AdminOrderDetail,
+  type AdminOrderListResponse,
   type AdminOrderRow,
   OrderParamsSchema,
   ORDER_STATUS_LABELS,
@@ -8,7 +9,7 @@ import {
   type OrderStatus,
 } from "@grabmarket/contracts";
 import { memo, useCallback, useState } from "react";
-import { Link, type LoaderFunctionArgs, useLoaderData } from "react-router";
+import { Form, Link, type LoaderFunctionArgs, Navigate, useLoaderData, useRevalidator } from "react-router";
 import { type ApiError, callApi, isApiError } from "../api/client.ts";
 import { Button, LinkButton } from "../components/button.tsx";
 import { Icon } from "../components/icon.tsx";
@@ -17,9 +18,11 @@ import { OrderLines } from "../components/order-lines.tsx";
 import { OrderSteps } from "../components/order-steps.tsx";
 import { Bone, EmptyState } from "../components/states.tsx";
 import { StatusBadge } from "../components/status-badge.tsx";
+import { type AdminOrderSearch, adminOrdersPath, parseAdminOrderSearch } from "../lib/admin-order-query.ts";
 import { formatFullTime, formatShortTime, krw } from "../lib/format.ts";
 import { withRo } from "../lib/korean.ts";
 import { NotFoundError } from "../lib/not-found.ts";
+import { pageWindow } from "../lib/pagination.ts";
 import { summarize } from "./orders-pages.tsx";
 
 const FLOW: OrderStatus[] = ["paid", "preparing", "shipping", "delivered"];
@@ -34,14 +37,16 @@ function without<T>(set: ReadonlySet<T>, value: T): Set<T> {
   return next;
 }
 
-// ---- 주문 목록: 전체 주문을 필터·검색·페이지 나누기 없이 한 화면에 ----
+// ---- 주문 목록: 상태 칩과 검색, 번호 방식 페이지 나누기 ----
 
-export function adminOrdersLoader() {
-  return { result: streamed(callApi("listAdminOrders")) };
+export function adminOrdersLoader({ request }: LoaderFunctionArgs) {
+  const search = parseAdminOrderSearch(new URL(request.url).searchParams);
+  if (search === null) throw new NotFoundError("주문 조회 조건이 올바르지 않습니다");
+  return { search, result: streamed(callApi("listAdminOrders", { query: { status: search.status, q: search.q, page: search.page } })) };
 }
 
 export function AdminOrdersPage() {
-  const { result } = useLoaderData<typeof adminOrdersLoader>();
+  const { search, result } = useLoaderData<typeof adminOrdersLoader>();
   return (
     <Loaded
       resolve={result}
@@ -57,24 +62,103 @@ export function AdminOrdersPage() {
         </>
       }
     >
-      {({ orders }) => <OrderTable orders={orders} />}
+      {(data) => <OrderList search={search} data={data} />}
     </Loaded>
   );
 }
 
-function Heading({ count }: { count?: number }) {
+function Heading({ label, count }: { label?: string; count?: number }) {
   return (
     <h1 className="mb-4 flex items-baseline gap-3 text-xl leading-8 font-extrabold text-ink">
       주문
-      {count !== undefined && <span className="text-sm leading-5 font-semibold text-ink-2">전체 주문 {count.toLocaleString("ko-KR")}건</span>}
+      {count !== undefined && label !== undefined && (
+        <span className="text-sm leading-5 font-semibold text-ink-2">
+          {label} {count.toLocaleString("ko-KR")}건
+        </span>
+      )}
     </h1>
+  );
+}
+
+const STATUS_CHIPS: { status: OrderStatus | undefined; label: string; count: keyof AdminOrderListResponse["statusCounts"] }[] = [
+  { status: undefined, label: "전체", count: "all" },
+  { status: "paid", label: ORDER_STATUS_LABELS.paid, count: "paid" },
+  { status: "preparing", label: ORDER_STATUS_LABELS.preparing, count: "preparing" },
+  { status: "shipping", label: ORDER_STATUS_LABELS.shipping, count: "shipping" },
+  { status: "delivered", label: ORDER_STATUS_LABELS.delivered, count: "delivered" },
+];
+
+function OrderList({ search, data }: { search: AdminOrderSearch; data: AdminOrderListResponse }) {
+  const filtered = search.status !== undefined || search.q !== undefined;
+  return (
+    <>
+      <Heading label={search.status === undefined ? "전체" : ORDER_STATUS_LABELS[search.status]} count={data.total} />
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <nav aria-label="상태" className="flex flex-wrap gap-2">
+          {STATUS_CHIPS.map((chip) => {
+            const selected = chip.status === search.status;
+            return (
+              <Link
+                key={chip.label}
+                to={adminOrdersPath({ ...search, status: chip.status, page: 1 })}
+                aria-current={selected ? "true" : undefined}
+                className={`inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-semibold ${selected ? "border-ink bg-ink text-on-dark" : "border-line bg-ground text-ink-2"}`}
+              >
+                {chip.label}
+                <b className={`font-bold tabular-nums ${selected ? "text-on-dark" : "text-ink-3"}`}>{data.statusCounts[chip.count].toLocaleString("ko-KR")}</b>
+              </Link>
+            );
+          })}
+        </nav>
+        <OrderSearch search={search} />
+      </div>
+      {data.total === 0 ? (
+        <div className="rounded-md border border-line bg-ground">
+          {filtered ? (
+            <EmptyState title="조건에 맞는 주문이 없어요" hint="상태나 검색어를 바꿔 보세요">
+              <LinkButton to="/admin/orders" variant="secondary">
+                조건 지우기
+              </LinkButton>
+            </EmptyState>
+          ) : (
+            <EmptyState title="아직 주문이 없어요" hint="고객이 주문하면 여기에 나타나요" />
+          )}
+        </div>
+      ) : data.orders.length === 0 ? (
+        // 주소의 쪽이 끝을 넘었거나(직접 입력), 마지막 쪽의 주문이 조건 밖으로 빠졌다. 남은 마지막 쪽으로 옮긴다.
+        <Navigate to={adminOrdersPath({ ...search, page: data.pageCount })} replace />
+      ) : (
+        <OrderTable search={search} data={data} />
+      )}
+    </>
+  );
+}
+
+/** 주문번호·고객 이름 검색. 엔터를 치면 주소의 q가 바뀌고 1쪽부터 다시 본다. 상태 조건은 그대로 둔다. */
+function OrderSearch({ search }: { search: AdminOrderSearch }) {
+  return (
+    <Form role="search" action="/admin/orders" className="relative ml-auto w-full md:w-80">
+      {search.status !== undefined && <input type="hidden" name="status" value={search.status} />}
+      <Icon name="search" className="pointer-events-none absolute top-2 left-3 size-5 text-ink-3" />
+      <input
+        key={search.q ?? ""}
+        type="search"
+        name="q"
+        defaultValue={search.q ?? ""}
+        maxLength={50}
+        aria-label="주문 검색"
+        placeholder="주문번호·고객 이름 검색"
+        className="h-9 w-full rounded-md border border-ink-3 bg-ground pr-3 pl-10 text-sm text-ink placeholder:text-ink-3"
+      />
+    </Form>
   );
 }
 
 const th = "sticky top-0 bg-ground font-normal";
 
-function OrderTable({ orders }: { orders: AdminOrderRow[] }) {
-  const [statuses, setStatuses] = useState<Record<number, OrderStatus>>({});
+function OrderTable({ search, data }: { search: AdminOrderSearch; data: AdminOrderListResponse }) {
+  const { orders } = data;
+  const revalidator = useRevalidator();
   const [busy, setBusy] = useState<ReadonlySet<number>>(new Set());
   const [failed, setFailed] = useState<ReadonlySet<number>>(new Set());
 
@@ -82,8 +166,9 @@ function OrderTable({ orders }: { orders: AdminOrderRow[] }) {
     setBusy((current) => new Set(current).add(id));
     setFailed((current) => without(current, id));
     callApi("changeOrderStatus", { params: { orderId: id }, body: { status: to } }).then(
-      ({ order }) => {
-        setStatuses((current) => ({ ...current, [id]: order.status }));
+      () => {
+        // 바뀐 주문이 지금 조건(상태 필터·쪽)에 아직 맞는지, 칩 개수와 쪽 수가 어떻게 되는지는 서버만 안다. 같은 조건으로 다시 받는다.
+        void revalidator.revalidate();
         setBusy((current) => without(current, id));
       },
       (error: unknown) => {
@@ -92,23 +177,12 @@ function OrderTable({ orders }: { orders: AdminOrderRow[] }) {
         setFailed((current) => new Set(current).add(id));
       },
     );
-  }, []);
+  }, [revalidator]);
 
-  if (orders.length === 0) {
-    return (
-      <>
-        <Heading count={0} />
-        <div className="rounded-md border border-line bg-ground">
-          <EmptyState title="아직 주문이 없어요" hint="고객이 주문하면 여기에 나타나요" />
-        </div>
-      </>
-    );
-  }
-
+  const first = ((data.page ?? 1) - 1) * data.pageSize + 1;
   return (
-    <>
-      <Heading count={orders.length} />
-      <div className="overflow-x-auto rounded-md border border-line bg-ground">
+    <section className="overflow-hidden rounded-md border border-line bg-ground">
+      <div className="overflow-x-auto">
         <table className="w-full min-w-225 border-collapse text-left text-sm">
           <thead>
             <tr className="h-10 text-xs-plus text-ink-3">
@@ -140,7 +214,6 @@ function OrderTable({ orders }: { orders: AdminOrderRow[] }) {
               <OrderRow
                 key={order.id}
                 order={order}
-                status={statuses[order.id] ?? order.status}
                 busy={busy.has(order.id)}
                 failed={failed.has(order.id)}
                 onAdvance={advance}
@@ -149,24 +222,72 @@ function OrderTable({ orders }: { orders: AdminOrderRow[] }) {
           </tbody>
         </table>
       </div>
-    </>
+      <div className="flex h-17 items-center border-t border-line px-6">
+        <p className="text-sm font-semibold text-ink-2 tabular-nums">
+          {data.total.toLocaleString("ko-KR")}건 중 {first.toLocaleString("ko-KR")}–{(first + orders.length - 1).toLocaleString("ko-KR")}
+        </p>
+        <Pager search={search} page={data.page ?? 1} pageCount={data.pageCount} />
+      </div>
+    </section>
+  );
+}
+
+const pagerItem = "inline-flex h-9 min-w-9 items-center justify-center rounded-md border px-2 text-sm font-semibold tabular-nums";
+
+function Pager({ search, page, pageCount }: { search: AdminOrderSearch; page: number; pageCount: number }) {
+  if (pageCount <= 1) return null;
+  const to = (target: number) => adminOrdersPath({ ...search, page: target });
+  return (
+    <nav aria-label="페이지 이동" className="ml-auto flex items-center gap-1">
+      {page > 1 ? (
+        <Link to={to(page - 1)} className={`${pagerItem} border-line bg-ground text-ink`}>
+          이전
+        </Link>
+      ) : (
+        <span aria-disabled="true" className={`${pagerItem} border-line bg-canvas text-ink-3`}>
+          이전
+        </span>
+      )}
+      {pageWindow(page, pageCount).map((item, index) =>
+        item === "gap" ? (
+          <span key={`gap-${String(index)}`} aria-hidden="true" className="px-2 text-ink-3">
+            …
+          </span>
+        ) : item === page ? (
+          <span key={item} aria-current="page" className={`${pagerItem} border-ink bg-ink font-bold text-on-dark`}>
+            {item}
+          </span>
+        ) : (
+          <Link key={item} to={to(item)} aria-label={`${String(item)}쪽`} className={`${pagerItem} border-line bg-ground text-ink`}>
+            {item}
+          </Link>
+        ),
+      )}
+      {page < pageCount ? (
+        <Link to={to(page + 1)} className={`${pagerItem} border-line bg-ground text-ink`}>
+          다음
+        </Link>
+      ) : (
+        <span aria-disabled="true" className={`${pagerItem} border-line bg-canvas text-ink-3`}>
+          다음
+        </span>
+      )}
+    </nav>
   );
 }
 
 const OrderRow = memo(function OrderRow({
   order,
-  status,
   busy,
   failed,
   onAdvance,
 }: {
   order: AdminOrderRow;
-  status: OrderStatus;
   busy: boolean;
   failed: boolean;
   onAdvance: (id: number, to: OrderStatus) => void;
 }) {
-  const next = nextOf(status);
+  const next = nextOf(order.status);
   return (
     <tr className="h-12 border-t border-line">
       <td className="px-6 font-extrabold text-ink">
@@ -179,7 +300,7 @@ const OrderRow = memo(function OrderRow({
       <td className="px-3 text-right font-extrabold text-ink">{krw(order.total)}</td>
       <td className="px-3 text-ink-2">{formatShortTime(order.createdAt)}</td>
       <td className="px-3">
-        <StatusBadge status={status} />
+        <StatusBadge status={order.status} />
       </td>
       <td className="px-6 text-right">
         {next !== null && (

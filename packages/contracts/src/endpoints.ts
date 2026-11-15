@@ -5,6 +5,7 @@ import { HealthResponseSchema } from "./common.ts";
 import { EventDetailResponseSchema, EventListResponseSchema, EventParamsSchema } from "./events.ts";
 import { InboundRequestSchema, InboundResponseSchema, InventoryListResponseSchema, InventoryMovementsResponseSchema, InventoryParamsSchema } from "./inventory.ts";
 import {
+  AdminOrderListQuerySchema,
   AdminOrderListResponseSchema,
   AdminOrderResponseSchema,
   ChangeOrderStatusRequestSchema,
@@ -55,7 +56,7 @@ export const ENDPOINTS = {
   listMyOrders: { method: "GET", path: ROUTES.orders, access: "customer", response: MyOrderListResponseSchema },
   getMyOrder: { method: "GET", path: ROUTES.order, access: "customer", params: OrderParamsSchema, response: MyOrderResponseSchema },
 
-  listAdminOrders: { method: "GET", path: ROUTES.adminOrders, access: "admin", response: AdminOrderListResponseSchema },
+  listAdminOrders: { method: "GET", path: ROUTES.adminOrders, access: "admin", query: AdminOrderListQuerySchema, response: AdminOrderListResponseSchema },
   getAdminOrder: { method: "GET", path: ROUTES.adminOrder, access: "admin", params: OrderParamsSchema, response: AdminOrderResponseSchema },
   changeOrderStatus: { method: "POST", path: ROUTES.adminOrderStatus, access: "admin", params: OrderParamsSchema, body: ChangeOrderStatusRequestSchema, response: AdminOrderResponseSchema },
 
