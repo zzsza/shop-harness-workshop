@@ -1,0 +1,288 @@
+// setup.mjs·claude.mjs 테스트용 격리 환경: 임시 HOME, 레포의 실행 파일만 복사한 임시 레포, PATH 위의 가짜 claude·npm.
+// 바깥 경계(claude·npm 프로그램, HOME)만 가짜로 두고 setup.mjs·claude.mjs는 실제 프로세스로 돌린다.
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
+import { createHash } from "node:crypto";
+import { chmodSync, copyFileSync, cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { findCommand } from "./command.ts";
+import { REPO_ROOT } from "./paths.ts";
+import type { Platform } from "./dependencies.ts";
+
+/**
+ * 테스트가 "이 컴퓨터"로 치는 OS·CPU. SETUP_SIMULATE_PLATFORM=<os>-<cpu>이면 그 값(setup.mjs 자식의 의존성 판정도 같은 값을 본다).
+ * 예: SETUP_SIMULATE_PLATFORM=linux-x64 npx vitest run tools/setup
+ */
+export const TEST_PLATFORM: Platform = (() => {
+  const [os, cpu] = (process.env.SETUP_SIMULATE_PLATFORM ?? "").split("-");
+  return os !== undefined && cpu !== undefined ? { os, cpu } : { os: process.platform, cpu: process.arch };
+})();
+const SIMULATE_PLATFORM_FILE = path.join(import.meta.dirname, "simulate-platform.ts");
+
+const REPO_FILES = [
+  "scripts/setup.mjs",
+  "scripts/claude.mjs",
+  "scripts/claude-reset.mjs",
+  "tools/setup",
+  ".env.example",
+  ".gitignore",
+  "package.json",
+  "package-lock.json",
+  "apps/api/src/config.ts",
+];
+
+// 진짜 claude 대신 PATH에 두는 가짜 claude. 부른 인자와 CLAUDE_CONFIG_DIR 값을 남기고, 띄우면 로그인한 것처럼 실습 설정 폴더에 파일을 남긴다.
+// --version은 FAKE_CLAUDE_VERSION(기본 9.9.9)을 답하고 FAKE_CLAUDE_VERSION_EXIT가 0이 아니면 실패하고, 띄운 claude는 FAKE_CLAUDE_EXIT로 끝난다(FAKE_CLAUDE_WAIT_FOR_INTERRUPT=1이면 SIGINT를 받을 때까지 기다린다).
+const FAKE_CLAUDE = `
+import { appendFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
+const args = process.argv.slice(2);
+const log = (entry) => appendFileSync(process.env.FAKE_CLAUDE_LOG, JSON.stringify(entry) + "\\n");
+log({ args, configDir: process.env.CLAUDE_CONFIG_DIR ?? null, cwd: process.cwd() });
+if (args[0] === "--version") {
+  if (process.env.FAKE_CLAUDE_VERSION_EXIT !== undefined && process.env.FAKE_CLAUDE_VERSION_EXIT !== "0") { console.error("broken install"); process.exit(Number(process.env.FAKE_CLAUDE_VERSION_EXIT)); }
+  console.log(process.env.FAKE_CLAUDE_VERSION ?? "9.9.9 (Claude Code)");
+  process.exit(0);
+}
+if (args[0] === "auth" && args[1] === "logout") {
+  rmSync(path.join(process.env.CLAUDE_CONFIG_DIR, ".credentials.json"), { force: true });
+  process.exit(Number(process.env.FAKE_CLAUDE_LOGOUT_EXIT ?? "0"));
+}
+mkdirSync(process.env.CLAUDE_CONFIG_DIR, { recursive: true });
+writeFileSync(path.join(process.env.CLAUDE_CONFIG_DIR, ".credentials.json"), "{}");
+if (process.env.FAKE_CLAUDE_WAIT_FOR_INTERRUPT === "1") {
+  process.on("SIGINT", () => process.exit(42));
+  setInterval(() => undefined, 1000);
+  log({ ready: true });
+} else {
+  process.exit(Number(process.env.FAKE_CLAUDE_EXIT ?? "0"));
+}
+`;
+
+// 진짜 npm 대신 PATH에 두는 가짜 npm. 네트워크·설치 없이 부른 인자만 남긴다.
+// ci는 미리 만들어 둔 "정상 설치" 숨은 lock을 node_modules에 복사하고, run db:reset은 DATABASE_PATH에 빈 DB 파일을 만든다(FAKE_NPM_EXIT가 0이 아니면 아무것도 하지 않고 실패한다).
+const FAKE_NPM = `
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+const args = process.argv.slice(2);
+appendFileSync(process.env.FAKE_NPM_LOG, JSON.stringify({ args, cwd: process.cwd() }) + "\\n");
+const exit = Number(process.env.FAKE_NPM_EXIT ?? "0");
+if (exit === 0 && args[0] === "ci") {
+  copyFileSync(process.env.FAKE_NPM_HIDDEN_LOCK, path.join(process.cwd(), "node_modules", ".package-lock.json"));
+  for (const location of Object.keys(JSON.parse(readFileSync(process.env.FAKE_NPM_HIDDEN_LOCK, "utf8")).packages)) {
+    const file = path.join(process.cwd(), location, "package.json");
+    if (existsSync(file)) continue;
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, "{}");
+  }
+}
+if (exit === 0 && args[0] === "run" && args[1] === "db:reset") writeFileSync(process.env.DATABASE_PATH, "");
+process.exit(exit);
+`;
+
+export interface NpmLogEntry {
+  args: string[];
+  cwd: string;
+}
+
+export interface LogEntry {
+  args?: string[];
+  configDir?: string | null;
+  cwd?: string;
+  ready?: boolean;
+}
+
+export interface Fixture {
+  root: string;
+  repo: string;
+  home: string;
+  /** 실습 설정 폴더 ~/.claude-workshop 자리 */
+  practiceDir: string;
+  /** 원래 ~/.claude 자리: 바뀌면 안 되는 파일들이 들어 있다. */
+  originalClaudeDir: string;
+  env: NodeJS.ProcessEnv;
+  claudeLog: () => LogEntry[];
+  /** 가짜 npm이 받은 호출. 진짜 npm은 한 번도 부르지 않는다. */
+  npmLog: () => NpmLogEntry[];
+  /** 가짜 npm run db:reset이 만들고, 설정(DATABASE_PATH)이 가리키는 DB 파일 */
+  databaseFile: string;
+  /** 임시 레포의 node_modules/.package-lock.json 위치 */
+  hiddenLockFile: string;
+  /** 임시 레포의 package-lock.json을 읽은 내용 */
+  readLock: () => LockFile;
+  /** 임시 레포의 숨은 lock을 읽은 내용 */
+  readHiddenLock: () => LockFile;
+  /** 숨은 lock의 packages를 통째로 바꿔 쓴다. */
+  replaceHiddenLockPackages: (replace: (packages: LockFile["packages"]) => LockFile["packages"]) => void;
+  /** 숨은 lock의 packages를 고쳐 쓴다. */
+  editHiddenLock: (edit: (packages: Record<string, Record<string, unknown>>) => void) => void;
+  run: (options?: { script?: "setup" | "claude" | "claude-reset"; args?: string[]; nodeArgs?: string[] }) => SpawnSyncReturns<string>;
+  cleanup: () => void;
+}
+
+/** env 사본의 PATH를 바꾼다. Windows에서는 키가 Path일 수 있어 대소문자 상관없이 찾는다. */
+function setPath(env: NodeJS.ProcessEnv, value: string): void {
+  const key = Object.keys(env).find((name) => name.toUpperCase() === "PATH") ?? "PATH";
+  env[key] = value;
+}
+
+export interface LockFile {
+  packages: Record<string, Record<string, unknown>>;
+}
+
+/** 이 컴퓨터에서 설치했을 때 npm이 남기는 숨은 lock(루트 없음): optional은 이 OS·CPU용 바이너리만 든다. */
+function hiddenLockFrom(lock: LockFile): LockFile {
+  const packages: LockFile["packages"] = {};
+  for (const [location, entry] of Object.entries(lock.packages)) {
+    if (location === "") continue;
+    if (entry.optional !== true) packages[location] = entry;
+    else if (Array.isArray(entry.os) && entry.os.includes(TEST_PLATFORM.os) && (entry.cpu === undefined || (Array.isArray(entry.cpu) && entry.cpu.includes(TEST_PLATFORM.cpu)))) packages[location] = entry;
+  }
+  return { ...lock, packages };
+}
+
+export function createFixture(options: { claude?: boolean; database?: boolean } = {}): Fixture {
+  // 하위 프로세스의 cwd와 비교하므로 실제 경로로 푼다(Mac의 /var → /private/var, Windows 짧은 이름).
+  const root = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), "setup-")));
+  const repo = path.join(root, "repo");
+  const home = path.join(root, "home");
+  const bin = path.join(root, "bin");
+  mkdirSync(bin, { recursive: true });
+
+  for (const file of REPO_FILES) {
+    cpSync(path.join(REPO_ROOT, file), path.join(repo, file), { recursive: true, preserveTimestamps: true });
+  }
+  // node_modules는 레포의 진짜 폴더와 이어지지 않는 독립 폴더다. setup.mjs가 불러오는 zod만 복사해 두고, 숨은 lock은 따로 만든다.
+  // 이어 두면 테스트 안에서 npm ci가 돌 때 진짜 node_modules를 지우거나 덮어쓴다.
+  mkdirSync(path.join(repo, "node_modules"));
+  cpSync(path.join(REPO_ROOT, "node_modules", "zod"), path.join(repo, "node_modules", "zod"), { recursive: true });
+  const readLock = (): LockFile => JSON.parse(readFileSync(path.join(repo, "package-lock.json"), "utf8")) as LockFile;
+  const readHiddenLock = (): LockFile => JSON.parse(readFileSync(path.join(repo, "node_modules", ".package-lock.json"), "utf8")) as LockFile;
+  const goodHiddenLock = path.join(root, "hidden-lock.good.json");
+  writeFileSync(goodHiddenLock, JSON.stringify(hiddenLockFrom(readLock())));
+  const hiddenLockFile = path.join(repo, "node_modules", ".package-lock.json");
+  copyFileSync(goodHiddenLock, hiddenLockFile);
+  // 숨은 lock이 가리키는 패키지 폴더. 설치 판정은 폴더의 package.json이 있는지도 본다. zod는 진짜를 복사해 뒀다.
+  for (const location of Object.keys(readHiddenLock().packages)) {
+    const file = path.join(repo, location, "package.json");
+    if (existsSync(file)) continue;
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, "{}");
+  }
+  // 원래 ~/.claude 자리: 바뀌면 안 되는 파일들
+  const originalClaudeDir = path.join(home, ".claude");
+  mkdirSync(path.join(originalClaudeDir, "projects", "work"), { recursive: true });
+  writeFileSync(path.join(originalClaudeDir, "settings.json"), '{"model":"original"}\n');
+  writeFileSync(path.join(originalClaudeDir, "projects", "work", "session.jsonl"), '{"type":"user"}\n');
+  writeFileSync(path.join(home, ".claude.json"), '{"oauthAccount":"original"}\n');
+
+  const claudeLogFile = path.join(root, "claude-log.jsonl");
+  if (options.claude !== false) {
+    writeFileSync(path.join(bin, "fake-claude.mjs"), FAKE_CLAUDE);
+    if (process.platform === "win32") {
+      writeFileSync(path.join(bin, "claude.cmd"), `@"${process.execPath}" "%~dp0fake-claude.mjs" %*\r\n`);
+    } else {
+      writeFileSync(path.join(bin, "claude"), `#!/bin/sh\nexec "${process.execPath}" "${path.join(bin, "fake-claude.mjs")}" "$@"\n`);
+      chmodSync(path.join(bin, "claude"), 0o755);
+    }
+  }
+
+  const npmLogFile = path.join(root, "npm-log.jsonl");
+  writeFileSync(path.join(bin, "fake-npm.mjs"), FAKE_NPM);
+  if (process.platform === "win32") {
+    writeFileSync(path.join(bin, "npm.cmd"), `@"${process.execPath}" "%~dp0fake-npm.mjs" %*\r\n`);
+  } else {
+    writeFileSync(path.join(bin, "npm"), `#!/bin/sh\nexec "${process.execPath}" "${path.join(bin, "fake-npm.mjs")}" "$@"\n`);
+    chmodSync(path.join(bin, "npm"), 0o755);
+  }
+
+  const databaseFile = path.join(root, "grabmarket.sqlite");
+  if (options.database !== false) writeFileSync(databaseFile, "");
+
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, USERPROFILE: home, DATABASE_PATH: databaseFile, FAKE_CLAUDE_LOG: claudeLogFile, FAKE_NPM_LOG: npmLogFile, FAKE_NPM_HIDDEN_LOCK: goodHiddenLock };
+  delete env.CLAUDE_CONFIG_DIR;
+  if (process.env.SETUP_SIMULATE_PLATFORM !== undefined && process.env.SETUP_SIMULATE_PLATFORM !== "") {
+    env.NODE_OPTIONS = `${env.NODE_OPTIONS ?? ""} --import ${pathToFileURL(SIMULATE_PLATFORM_FILE).href}`.trim();
+  }
+  // 진짜 claude·npm이 보이지 않도록 PATH에는 가짜 claude·npm 폴더만 둔다.
+  setPath(env, bin);
+
+  // 진짜 npm이 잡히면 테스트가 실제로 설치를 시도한다. PATH에서 npm은 항상 가짜여야 한다.
+  const npm = findCommand("npm", {
+    platform: process.platform,
+    pathValue: env.PATH ?? env.Path ?? "",
+    pathExt: env.PATHEXT,
+    isExecutable: (file) => existsSync(file),
+  });
+  if (npm === null || path.dirname(npm) !== bin) throw new Error(`테스트 PATH의 npm이 가짜가 아닙니다: ${npm ?? "없음"}`);
+
+  return {
+    root,
+    repo,
+    home,
+    practiceDir: path.join(home, ".claude-workshop"),
+    originalClaudeDir,
+    databaseFile,
+    env,
+    claudeLog: () =>
+      existsSync(claudeLogFile)
+        ? readFileSync(claudeLogFile, "utf8")
+            .trim()
+            .split("\n")
+            .map((line) => JSON.parse(line) as LogEntry)
+        : [],
+    npmLog: () =>
+      existsSync(npmLogFile)
+        ? readFileSync(npmLogFile, "utf8")
+            .trim()
+            .split("\n")
+            .map((line) => JSON.parse(line) as NpmLogEntry)
+        : [],
+    hiddenLockFile,
+    readLock,
+    readHiddenLock,
+    replaceHiddenLockPackages: (replace) => {
+      const hidden = readHiddenLock();
+      writeFileSync(hiddenLockFile, JSON.stringify({ ...hidden, packages: replace(hidden.packages) }));
+    },
+    editHiddenLock: (edit) => {
+      const hidden = readHiddenLock();
+      edit(hidden.packages);
+      writeFileSync(hiddenLockFile, JSON.stringify(hidden));
+    },
+    run: (runOptions = {}) =>
+      spawnSync(process.execPath, [...(runOptions.nodeArgs ?? []), path.join(repo, "scripts", `${runOptions.script ?? "setup"}.mjs`), ...(runOptions.args ?? [])], {
+        cwd: repo,
+        env,
+        input: "",
+        encoding: "utf8",
+        timeout: 60_000,
+      }),
+    cleanup: () => {
+      rmSync(root, { recursive: true, force: true });
+    },
+  };
+}
+
+/** 폴더 안 파일마다 내용 해시. 원래 ~/.claude 자리가 그대로인지 비교할 때 쓴다. */
+export function hashTree(dir: string): Record<string, string> {
+  const hashes: Record<string, string> = {};
+  const walk = (current: string): void => {
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else hashes[path.relative(dir, full)] = createHash("sha256").update(readFileSync(full)).digest("hex");
+    }
+  };
+  walk(dir);
+  return hashes;
+}
+
+/** 원래 ~/.claude와 ~/.claude.json의 해시. */
+export function originalClaudeState(fixture: Fixture): Record<string, string> {
+  return {
+    ...hashTree(fixture.originalClaudeDir),
+    ".claude.json": createHash("sha256").update(readFileSync(path.join(fixture.home, ".claude.json"))).digest("hex"),
+  };
+}

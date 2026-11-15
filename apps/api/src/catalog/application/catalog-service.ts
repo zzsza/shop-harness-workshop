@@ -1,0 +1,82 @@
+import { DomainError, notFound } from "../../shared/domain/domain-error.ts";
+import type { Category, CategoryCount, CatalogRepository, Product, ProductVariant, SearchCriteria, VariantRef } from "../domain/product.ts";
+import type { ProductStory, ProductStoryRepository } from "../domain/product-story.ts";
+import { suggestCategory } from "../domain/suggest.ts";
+
+export interface SearchResult {
+  products: Product[];
+  categoryCounts: CategoryCount[];
+}
+
+export interface SuggestResult {
+  category: Category | null;
+  products: { id: number; name: string }[];
+}
+
+export interface ProductDetailVariant extends ProductVariant {
+  /** 옵션마다 한 줄 */
+  note: string;
+}
+
+export interface ProductDetail {
+  product: Product;
+  variants: ProductDetailVariant[];
+  story: ProductStory;
+}
+
+export class CatalogService {
+  readonly #catalog: CatalogRepository;
+  readonly #stories: ProductStoryRepository;
+
+  constructor(catalog: CatalogRepository, stories: ProductStoryRepository) {
+    this.#catalog = catalog;
+    this.#stories = stories;
+  }
+
+  listCategories(): Category[] {
+    return this.#catalog.listCategories();
+  }
+
+  search(criteria: SearchCriteria): SearchResult {
+    return { products: this.#catalog.search(criteria), categoryCounts: this.#catalog.countByCategory(criteria) };
+  }
+
+  suggest(q: string, limit: number): SuggestResult {
+    const matches = this.#catalog.suggest(q, limit);
+    return { category: suggestCategory(q, this.#catalog.listCategories(), matches.categorySlugs), products: matches.products };
+  }
+
+  /** 없는 상품은 NOT_FOUND. 상품에 글이나 옵션 한 줄이 없으면 데이터가 어긋난 것이라 오류로 올린다. */
+  getProduct(id: number): ProductDetail {
+    const product = this.#catalog.findById(id);
+    if (product === undefined) throw notFound("상품");
+    const story = this.#stories.findByBaseKey(product.baseKey);
+    if (story === undefined) throw new Error(`상품 상세 글이 없습니다: ${product.baseKey}`);
+    const variants = this.#catalog.findVariants(product.baseKey).map((variant) => {
+      const note = story.variantNotes[variant.optionLabel ?? ""];
+      if (note === undefined) throw new Error(`옵션 한 줄이 없습니다: ${product.baseKey} ${variant.optionLabel ?? "(옵션 없음)"}`);
+      return { ...variant, note };
+    });
+    return { product, variants, story };
+  }
+
+  /** 기획전이 쓰는 조회: 모든 상품이 있어야 한다. 요청 순서대로 돌려준다. 없는 상품은 데이터가 어긋난 것이라 오류로 올린다. */
+  getProductsByVariant(refs: readonly VariantRef[]): Product[] {
+    const found = new Map(this.#catalog.findByVariants(refs).map((product) => [`${product.baseKey}\u0000${product.optionLabel ?? ""}`, product]));
+    return refs.map((ref) => {
+      const product = found.get(`${ref.baseKey}\u0000${ref.optionLabel}`);
+      if (product === undefined) throw new Error(`상품이 없습니다: ${ref.baseKey} ${ref.optionLabel}`);
+      return product;
+    });
+  }
+
+  /** 주문이 쓰는 조회: 모든 상품이 있어야 한다. 요청 순서대로 돌려준다. */
+  getProductsForOrder(ids: number[]): Product[] {
+    const found = new Map(this.#catalog.findByIds(ids).map((product) => [product.id, product]));
+    return ids.map((id) => {
+      const product = found.get(id);
+      if (product === undefined) throw new DomainError("NOT_FOUND", "주문할 수 없는 상품이 있습니다.");
+      return product;
+    });
+  }
+}

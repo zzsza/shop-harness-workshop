@@ -1,0 +1,33 @@
+# PR 검사: 수강생 fork에서 PR을 열면 돈다. 로컬의 npm run ci와 같은 명령이다.
+# Day3에서 이 워크플로에 코드 리뷰·보안 리뷰 job을 더한다.
+name: PR 검사
+
+on:
+  pull_request:
+  # 손으로 다시 돌릴 때(Actions 탭의 Run workflow)
+  workflow_dispatch:
+
+# 검사는 코드를 읽기만 한다.
+permissions:
+  contents: read
+
+# 같은 PR에 새 커밋이 오면 앞선 검사는 멈춘다(루프가 고쳐서 다시 올릴 때 줄을 서지 않게).
+concurrency:
+  group: pr-check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: 검사
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 채점이 base 브랜치와 갈라진 곳을 찾으므로 기록 전체를 받는다.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm run ci
