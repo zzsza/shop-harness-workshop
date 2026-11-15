@@ -20,6 +20,8 @@ Windows에서는 npm 대신 Claude Code 공식 설치 명령(PowerShell `irm htt
 #### Windows: 어느 터미널에서 하나요
 
 PowerShell(Windows Terminal)을 권합니다. Git Bash나 명령 프롬프트(cmd)에서 해도 같은 Node·Claude Code를 쓰므로 똑같이 됩니다.
+PowerShell에서 `npm`이 「npm.ps1 파일을 로드할 수 없습니다」(PSSecurityException)로 막히면, 그 창에서 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`를 한 번 실행한 뒤 다시 합니다. 관리자 권한은 필요 없습니다.
+회사 정책 때문에 이 명령도 막히면 `npm` 대신 `npm.cmd`로 하거나(예: `npm.cmd run setup`) 명령 프롬프트(cmd)에서 합니다.
 WSL은 터미널이 아니라 Windows 안의 별도 리눅스라서, WSL로 하려면 처음부터 끝까지 WSL 안에서 합니다.
 
 - WSL 안에 Node 22.18 이상, git, Claude Code를 따로 설치합니다. Windows에 깔린 것은 WSL에서 쓰지 않습니다.
