@@ -125,8 +125,8 @@ describe("npm run judge", { timeout: 30_000 }, () => {
     const { code, output } = judge(fx);
 
     expect(code).toBe(1);
-    expect(output).toContain("| 1 안전재고 알림 | 실패 0/1 | 틀림 |");
-    expect(output).toContain("| 2 부분 환불 | 실패 0/1 | 틀림 |");
+    expect(output).toContain("| 1 안전재고 알림 | 실패 (통과 0/1) | 틀림 |");
+    expect(output).toContain("| 2 부분 환불 | 실패 (통과 0/1) | 틀림 |");
     expect(output).toContain("| 4 단골 고객 배송비 무료 | 없음 |");
     expect(output).toContain("AssertionError: 구현이 없어요");
     expect(seen(fx)).toEqual(["issue-1.test.ts", "issue-2.test.ts"]);

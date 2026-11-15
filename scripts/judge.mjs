@@ -257,7 +257,9 @@ const rows = issues.map((issue) => {
   if (!hidden.has(issue)) return { name, hiddenText: "없음", verdict: "숨은 테스트 없음(사람이 정할 이슈)", ok: true };
   if (result === undefined) return { name, hiddenText: "결과 없음", verdict: "틀림", ok: false };
   const ok = result.failures.length === 0;
-  return { name, hiddenText: `${ok ? "통과" : "실패"} ${result.passed}/${result.total}`, verdict: ok ? "맞음" : "틀림", ok };
+  // 숫자는 통과한 테스트 수다. 실패 줄에서 "실패 1/7"이 "7개 중 1개 실패"로 읽히지 않게 통과 수라고 적는다.
+  const counts = `${result.passed}/${result.total}`;
+  return { name, hiddenText: ok ? `통과 ${counts}` : `실패 (통과 ${counts})`, verdict: ok ? "맞음" : "틀림", ok };
 });
 
 console.log(`\n이슈별 결과 (숨은 테스트: ${answers} ${answersCommit})\n`);
