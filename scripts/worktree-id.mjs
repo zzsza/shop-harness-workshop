@@ -7,7 +7,7 @@ import { copyFileSync, existsSync, mkdtempSync, rmSync, statSync, utimesSync } f
 import os from "node:os";
 import path from "node:path";
 
-function git(cwd, args, env = {}) {
+export function git(cwd, args, env = {}) {
   const result = spawnSync("git", args, { cwd, encoding: "utf8", env: { ...process.env, ...env } });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`git ${args.join(" ")} 실패: ${result.stderr.trim()}`);

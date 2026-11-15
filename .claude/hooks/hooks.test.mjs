@@ -1,7 +1,7 @@
 // Hook 판정 함수의 테스트. 판정 범위는 README.md에 있고, 그 범위를 아래 '막는다'·'통과한다' 표로 고정한다.
 // 표의 출처: 리뷰1(3acdb3d 리뷰), 재리뷰1(36b6ef4 재리뷰), 재리뷰2(그 재리뷰의 인접 입력과 고치기 지시).
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -9,6 +9,9 @@ import { decide as guardBash } from "./guard-bash.mjs";
 import * as lintSavedFile from "./lint-saved-file.mjs";
 import { decide as protectFiles } from "./protect-files.mjs";
 import { decide as stopVerify } from "./stop-verify.mjs";
+import { decide as checkReviewCommit } from "./check-review-commit.mjs";
+import { decide as stopAcTests } from "./stop-ac-tests.mjs";
+import { decide as subagentEvidence } from "./subagent-evidence.mjs";
 
 const { lintTarget } = lintSavedFile;
 const bash = (command) => ({ tool_name: "Bash", tool_input: { command } });
@@ -502,5 +505,266 @@ describe("작업 트리 지문", () => {
     repo.git("commit", "-q", "-m", "change");
     expect(worktreeId(repo.dir)).toBe(withNew);
     expect(repo.git("status", "--porcelain")).toBe("");
+  });
+});
+
+// 실습 3 Hook: 아래는 세션 기록 한 줄씩을 만드는 도우미. stop-verify 표와 같은 모양이다.
+const entry = {
+  command: (name, args) => JSON.stringify({ message: { role: "user", content: `<command-message>${name}</command-message>\n<command-name>/${name}</command-name>\n<command-args>${args}</command-args>` } }),
+  skillTool: (skill, args) => JSON.stringify({ message: { role: "assistant", content: [{ type: "tool_use", id: "s1", name: "Skill", input: { skill, args } }] } }),
+  verifyPassed: (id, tree) => [
+    JSON.stringify({ message: { content: [{ type: "tool_use", id, name: "Bash", input: { command: "npm run verify" } }] } }),
+    JSON.stringify({ message: { content: [{ type: "tool_result", tool_use_id: id, content: `[verify] 전체 통과 · 작업 트리 ${tree}` }] } }),
+  ],
+};
+const put = (dir, name, text) => {
+  mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
+  writeFileSync(path.join(dir, name), text);
+};
+const prd = (status, acs) =>
+  [`# x`, ``, `확정 여부: **${status}**`, ``, `## 완료 기준`, ``, `| AC | 상황 | 확인 방법 |`, `| --- | --- | --- |`, ...acs.map((n) => `| AC-${n} | 무엇 | 테스트 |`), ``].join("\n");
+
+describe("stop-ac-tests (implement의 완료 기준 Stop Hook)", () => {
+  let repo;
+  let worktreeId;
+  const TREE = "a".repeat(40);
+  const NEW_TESTS = [
+    'it("x AC-1 첫째", () => {});',
+    'it.each(["a", "b"])("x AC-2 %s 둘째", (value) => {});',
+    "describe(`x AC-3 셋째`, () => {});",
+  ].join("\n");
+  const run = (transcriptLines, { tree = TREE, active = false } = {}) =>
+    stopAcTests({ transcript_path: "t", stop_hook_active: active }, { root: repo.dir, readTranscript: () => transcriptLines.join("\n"), currentTree: () => tree });
+  const passed = (...before) => [entry.command("implement", "x"), ...before, ...entry.verifyPassed("v", TREE)];
+
+  beforeAll(async () => {
+    ({ worktreeId } = await import("../../scripts/worktree-id.mjs"));
+    repo = tempRepo({ "README.md": "# x\n" });
+    put(repo.dir, ".claude/skills/implement/SKILL.md", "---\nname: implement\n---\n");
+    put(repo.dir, ".claude/skills/review/SKILL.md", "---\nname: review\n---\n");
+    put(repo.dir, "docs/tasks/x/prd.md", prd("확정", [1, 2, 3]));
+    // 다른 작업의 테스트. AC 번호가 같아도 slug가 달라서 이 작업의 테스트로 세지 않는다.
+    put(repo.dir, "tests/other.test.ts", 'it("y AC-1 다른 작업", () => {});\nit("AC-2 slug 없는 이름", () => {});\nit("xx AC-3 비슷한 slug", () => {});\n');
+    repo.git("add", "-A");
+    repo.git("commit", "-q", "-m", "base");
+    repo.git("switch", "-q", "-c", "feat/x");
+  });
+  afterAll(() => rmSync(repo.dir, { recursive: true, force: true }));
+
+  it("AC마다 이름에 'x AC-n'이 든 테스트가 있고 지금 코드로 verify가 통과했으면 끝낸다", () => {
+    put(repo.dir, "tests/x.test.ts", NEW_TESTS);
+    expect(run(passed())).toBeNull();
+  });
+
+  it("테스트 이름에서 AC 번호를 지우면 'AC-2에 테스트 없음'으로 돌려보낸다", () => {
+    put(repo.dir, "tests/x.test.ts", NEW_TESTS.replace("x AC-2 %s", "x %s"));
+    const output = run(passed());
+    expect(output).toMatchObject({ decision: "block" });
+    expect(output.reason).toContain("AC-2에 테스트 없음");
+    expect(output.reason).not.toContain("AC-1");
+  });
+
+  it("다른 작업의 slug, slug 없는 이름, 비슷한 slug의 AC 번호는 세지 않는다", () => {
+    put(repo.dir, "tests/x.test.ts", "");
+    expect(run(passed()).reason).toContain("AC-1, AC-2, AC-3에 테스트 없음");
+  });
+
+  it("이미 커밋된 테스트도, 아직 커밋 안 한 새 테스트 파일도 센다(시작 브랜치에 들어 있던 작업을 이어 할 때)", () => {
+    put(repo.dir, "tests/x.test.ts", 'it("x AC-1 첫째", () => {});\n');
+    repo.git("add", "-A");
+    repo.git("commit", "-q", "-m", "AC-1");
+    put(repo.dir, "apps/web/y.test.tsx", 'test("x AC-2 둘째", () => {});\ndescribe("x AC-3 셋째", () => {});\n');
+    expect(run(passed())).toBeNull();
+    rmSync(path.join(repo.dir, "apps"), { recursive: true, force: true });
+  });
+
+  it("verify가 없거나 verify 뒤에 코드가 바뀌었으면 돌려보낸다", () => {
+    put(repo.dir, "tests/x.test.ts", NEW_TESTS);
+    expect(run([entry.command("implement", "x")]).reason).toContain("전체 통과한 `npm run verify`가 없습니다");
+    expect(run(passed(), { tree: "b".repeat(40) }).reason).toContain("verify` 뒤에 코드가 바뀌었습니다");
+  });
+
+  it("실제 작업 트리 지문으로도 verify 통과를 확인한다", () => {
+    put(repo.dir, "tests/x.test.ts", NEW_TESTS);
+    const tree = worktreeId(repo.dir);
+    const output = stopAcTests(
+      { transcript_path: "t" },
+      { root: repo.dir, readTranscript: () => [entry.command("implement", "x"), ...entry.verifyPassed("v", tree)].join("\n"), currentTree: () => worktreeId(repo.dir) },
+    );
+    expect(output).toBeNull();
+  });
+
+  it("Skill 도구로 부른 implement도, 인자 없이 부른 implement(브랜치 feat/x)도 같은 작업으로 본다", () => {
+    put(repo.dir, "tests/x.test.ts", NEW_TESTS.replace("x AC-3 셋째", "셋째"));
+    expect(run([entry.skillTool("implement", "x"), ...entry.verifyPassed("v", TREE)]).reason).toContain("AC-3에 테스트 없음");
+    expect(run([entry.command("implement", ""), ...entry.verifyPassed("v", TREE)]).reason).toContain("AC-3에 테스트 없음");
+  });
+
+  it("implement 뒤에 다른 Skill(/review)을 불렀으면 implement 차례가 아니므로 보지 않는다", () => {
+    put(repo.dir, "tests/x.test.ts", "");
+    expect(run([entry.command("implement", "x"), entry.command("review", "x")])).toBeNull();
+    // 레포 Skill이 아닌 내장 명령(/compact 등)은 implement 차례를 끝내지 않는다.
+    expect(run([entry.command("implement", "x"), entry.command("compact", "")])).toMatchObject({ decision: "block" });
+  });
+
+  it("Windows에서 CRLF로 꺼낸 PRD와 테스트 파일도 같은 AC로 읽는다", () => {
+    put(repo.dir, "docs/tasks/x/prd.md", prd("확정", [1, 2, 3]).replaceAll("\n", "\r\n"));
+    put(repo.dir, "tests/x.test.ts", NEW_TESTS.replace("x AC-3 셋째", "셋째").replaceAll("\n", "\r\n"));
+    expect(run(passed()).reason).toContain("AC-3에 테스트 없음");
+    put(repo.dir, "tests/x.test.ts", NEW_TESTS.replaceAll("\n", "\r\n"));
+    expect(run(passed())).toBeNull();
+    put(repo.dir, "docs/tasks/x/prd.md", prd("확정", [1, 2, 3]));
+  });
+
+  it("초안 PRD는 implement가 구현하지 않고 돌려보내는 자리라 보지 않는다", () => {
+    put(repo.dir, "docs/tasks/x/prd.md", prd("초안", [1, 2, 3]));
+    put(repo.dir, "tests/x.test.ts", "");
+    expect(run([entry.command("implement", "x")])).toBeNull();
+    put(repo.dir, "docs/tasks/x/prd.md", prd("확정", [1, 2, 3]));
+  });
+
+  it("한 번 돌려보낸 뒤에도 그대로면 무한히 막지 않고 이유를 남긴다", () => {
+    put(repo.dir, "tests/x.test.ts", "");
+    const output = run([entry.command("implement", "x")], { active: true });
+    expect(output).not.toHaveProperty("decision");
+    expect(output.systemMessage).toContain("AC-1, AC-2, AC-3에 테스트 없음");
+  });
+
+  it("작업 트리 지문을 만들지 못하면 확인된 것으로 치지 않고 막는다", () => {
+    put(repo.dir, "tests/x.test.ts", NEW_TESTS);
+    const output = stopAcTests(
+      { transcript_path: "t" },
+      { root: repo.dir, readTranscript: () => passed().join("\n"), currentTree: () => { throw new Error("git 없음"); } },
+    );
+    expect(output).toMatchObject({ decision: "block" });
+  });
+});
+
+describe("check-review-commit (리뷰 뒤 코드가 바뀌면 PR 만들기를 막는 Hook)", () => {
+  let repo;
+  const create = (command) => checkReviewCommit({ tool_name: "Bash", tool_input: { command }, cwd: repo.dir });
+  const CREATE = "git push -u origin HEAD && gh pr create --base day2-b --title t --body-file docs/tasks/x/run/pr.md";
+  const review = (verdict, commit) => put(repo.dir, "docs/tasks/x/run/review.md", `# x 리뷰\n\n전체 판정: **${verdict}**\n검증한 커밋: ${commit} (기준 abc1234)\n`);
+
+  beforeAll(() => {
+    repo = tempRepo({ "a.ts": "export const a = 1;\n" });
+    repo.git("switch", "-q", "-c", "feat/x");
+  });
+  afterAll(() => rmSync(repo.dir, { recursive: true, force: true }));
+
+  it("PASS 리뷰가 지금 HEAD를 검증했으면 PR을 연다", () => {
+    review("PASS", repo.git("rev-parse", "--short", "HEAD"));
+    expect(create(CREATE)).toBeNull();
+  });
+
+  it("리뷰 뒤에 커밋이 생겼으면 막고 /review를 다시 돌리라고 한다", () => {
+    const reviewed = repo.git("rev-parse", "--short", "HEAD");
+    review("PASS", reviewed);
+    repo.write("a.ts", "export const a = 2;\n");
+    repo.git("commit", "-qam", "after review");
+    const output = create(CREATE);
+    expect(denied(output)).toBe(true);
+    expect(output.hookSpecificOutput.permissionDecisionReason).toContain(`${reviewed}를 검증했는데`);
+    expect(output.hookSpecificOutput.permissionDecisionReason).toContain("/review x");
+  });
+
+  it("review.md가 없거나 PASS가 아니면 막는다", () => {
+    review("FAIL", repo.git("rev-parse", "HEAD"));
+    expect(denied(create(CREATE))).toBe(true);
+    rmSync(path.join(repo.dir, "docs/tasks/x/run/review.md"));
+    expect(create(CREATE).hookSpecificOutput.permissionDecisionReason).toContain("review.md가 없습니다");
+  });
+
+  it("--body-file이 없으면 브랜치 feat/<slug>로 작업을 찾고, 옵션이 앞에 와도 gh pr create로 본다", () => {
+    review("PASS", "0000000");
+    expect(denied(create("gh pr create --fill"))).toBe(true);
+    expect(denied(create("gh -R me/shop pr create --fill"))).toBe(true);
+    review("PASS", repo.git("rev-parse", "HEAD"));
+    expect(create("gh pr create --fill")).toBeNull();
+  });
+
+  it("gh pr create가 아닌 명령은 보지 않는다", () => {
+    review("FAIL", "0000000");
+    for (const command of ["gh pr checks --watch", "gh pr view 3", "git push -u origin HEAD", "echo gh pr create"]) {
+      expect(create(command), command).toBeNull();
+    }
+  });
+});
+
+describe("subagent-evidence (검증자가 근거와 커밋 id 없이 끝내지 못하게)", () => {
+  const HEAD = "1234567890abcdef1234567890abcdef12345678";
+  const stop = (agent_type, last_assistant_message, extra = {}) => subagentEvidence({ agent_type, last_assistant_message, ...extra }, () => HEAD);
+  const SPEC = [
+    "검증한 커밋: 1234567",
+    "verify: 통과  근거: evidence/verify.txt",
+    "| AC | 판정 | 테스트 | 근거 |",
+    "| --- | --- | --- | --- |",
+    '| AC-1 | PASS | tests/x.test.ts "AC-1 ..." | evidence/spec-AC-1.txt: 1 passed |',
+    "| AC-2 | FAIL | 없음 | AC-2 테스트 없음 |",
+    "| AC-3 | 웹 확인 몫 | - | - |",
+    "한계: 없음",
+  ].join("\n");
+
+  it("판정 줄마다 근거가 있고 검증한 커밋이 지금 HEAD면 끝낸다", () => {
+    expect(stop("spec-checker", SPEC)).toBeNull();
+  });
+
+  it("근거가 빈 판정 줄이 있으면 그 줄을 짚어 돌려보낸다", () => {
+    const output = stop("spec-checker", SPEC.replace("evidence/spec-AC-1.txt: 1 passed", "-"));
+    expect(output).toMatchObject({ decision: "block" });
+    expect(output.reason).toContain("근거가 빈 줄: AC-1");
+  });
+
+  it("검증한 커밋 줄이 없거나 지금 HEAD가 아니면 돌려보낸다", () => {
+    expect(stop("spec-checker", SPEC.replace("검증한 커밋: 1234567\n", "")).reason).toContain("검증한 커밋");
+    expect(stop("spec-checker", SPEC.replace("1234567", "abcdef0")).reason).toContain("지금 HEAD 1234567와 다릅니다");
+  });
+
+  it("판정 표가 없으면 돌려보내고, 웹 확인이 화면 확인 AC 없음이라고 하면 끝낸다", () => {
+    expect(stop("spec-checker", "검증한 커밋: 1234567\n모두 PASS입니다.")).toMatchObject({ decision: "block" });
+    expect(stop("web-checker", "검증한 커밋: 1234567\n화면 확인 AC 없음")).toBeNull();
+  });
+
+  it("웹 확인의 PASS 줄에 화면이 없으면 돌려보낸다", () => {
+    const web = (screen) => `검증한 커밋: 1234567\n| AC | 판정 | 해 본 것 | 화면 |\n| AC-9 | PASS | 로그인 → 주문 취소 → "주문취소" 보임 | ${screen} |`;
+    expect(stop("web-checker", web("evidence/web-AC-9.png"))).toBeNull();
+    expect(stop("web-checker", web("-")).reason).toContain("근거가 빈 줄: AC-9");
+  });
+
+  it("코드 리뷰의 diff에 없는 꼭 볼 곳 줄은 근거 없이도 된다", () => {
+    const review = [
+      "검증한 커밋: 1234567",
+      "| # | 판정 | 근거 |",
+      "| 1 | 위반 없음 | evidence/grade.txt 통과 |",
+      "| 항목 | 결과 | 근거 |",
+      "| 결제 금액 | diff에 없음 | - |",
+    ].join("\n");
+    expect(stop("code-reviewer", review)).toBeNull();
+    expect(stop("code-reviewer", review.replace("evidence/grade.txt 통과", "")).reason).toContain("근거가 빈 줄: 1");
+  });
+
+  it("Windows 줄바꿈(CRLF)으로 온 답도 같은 표로 읽는다", () => {
+    expect(stop("spec-checker", SPEC.replaceAll("\n", "\r\n"))).toBeNull();
+  });
+
+  it("검증자가 아닌 서브에이전트는 보지 않고, 한 번 돌려보낸 뒤에는 이유만 남긴다", () => {
+    expect(stop("Explore", "아무 답")).toBeNull();
+    const output = stop("spec-checker", "모두 PASS", { stop_hook_active: true });
+    expect(output).not.toHaveProperty("decision");
+    expect(output.systemMessage).toContain("검증한 커밋");
+  });
+});
+
+describe("settings.json 위험 경로 승인", () => {
+  const root = path.resolve(import.meta.dirname, "..", "..");
+  const settings = JSON.parse(readFileSync(path.join(root, ".claude", "settings.json"), "utf8"));
+
+  it("permissions.ask의 Edit 경로가 레포에 실제로 있다(경로가 틀리면 승인 창이 뜨지 않는다)", () => {
+    const edits = settings.permissions.ask.filter((rule) => rule.startsWith("Edit("));
+    expect(edits.length).toBeGreaterThan(0);
+    for (const rule of edits) {
+      const target = rule.slice("Edit(./".length, -1).replace(/\/\*\*$/, "");
+      expect(existsSync(path.join(root, target)), rule).toBe(true);
+    }
   });
 });

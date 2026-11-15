@@ -15,6 +15,9 @@
 | `protect-files.mjs` | 이미 커밋된 마이그레이션 수정·삭제·이동 | `sed -i ... 0001_init.sql`, `git diff --output=0001_init.sql`, `rm -r packages/db` |
 | `stop-verify.mjs` | 코드를 바꾼 뒤 전체 `npm run verify` 없이 끝내기 | `--only`로 일부만 돌린 것, verify 뒤에 다시 고친 것 |
 | `lint-saved-file.mjs` | 막지 않음. 저장한 파일의 lint 결과를 돌려줌 | 25초를 넘으면 건너뛰었다고 알림 |
+| `stop-ac-tests.mjs` (implement Skill frontmatter의 Stop) | `/implement`가 PRD의 AC마다 이름에 `<slug> AC-n`이 든 테스트 없이, 또는 지금 코드로 전체 verify 통과 없이 끝내기 | 테스트 이름 `order-cancel AC-4 ...`에서 AC 번호를 지우면 "AC-4에 테스트 없음"으로 돌려보냄. 레포의 테스트 파일 전부에서 찾음 |
+| `check-review-commit.mjs` (PreToolUse Bash) | `gh pr create` 때 `run/review.md`의 검증한 커밋이 HEAD가 아니거나, 전체 판정이 PASS가 아니거나, review.md가 없음 | 리뷰 뒤에 커밋을 하나 더 하고 PR 열기 |
+| `subagent-evidence.mjs` (프로젝트 settings의 SubagentStop) | 검증자 셋이 "검증한 커밋: <HEAD>" 줄이나 판정 줄마다의 근거 없이 끝내기 | 근거 칸이 `-`인 PASS 줄, 화면 칸이 빈 웹 확인 PASS 줄 |
 
 명령을 읽을 때 앞뒤에 붙은 것을 벗겨서 실제로 실행되는 명령을 봅니다.
 
@@ -62,5 +65,25 @@ HEAD에 없는 번호 파일은 커밋하기 전까지 고칠 수 있습니다.
 - 드문 쓰기 방법: `sed` 스크립트의 `w` 명령, `less -o` 같은 출력 옵션.
 - `.env` 읽기 차단은 경로 이름 기준입니다. 심볼릭 링크나 다른 이름으로 복사한 파일은 따라가지 않습니다.
 
-Stop Hook은 한 번 막은 뒤에도 그대로 끝내려 하면 경고만 남기고 끝내게 둡니다.
+Stop·SubagentStop Hook은 한 번 막은 뒤에도 그대로 끝내려 하면 경고만 남기고 끝내게 둡니다.
 계속 막으면 끝내기가 끝없이 반복되기 때문입니다.
+
+## 무인 허용 목록 (settings.json permissions.allow)
+
+사람 없이 `/implement` → `/review` → `/pr-ship`이 끝까지 가도록, 그 길에서 쓰는 명령만 allow에 둡니다. 머지와 force push는 deny입니다.
+
+| 명령 | 까닭 |
+| --- | --- |
+| `npm run verify`·`npm run ci`·`npm run grade` | 검사 |
+| `git add`·`git commit`·`git push` | 커밋하고 올리기. force push는 deny와 `guard-bash.mjs`가 막음 |
+| `gh pr create`·`gh pr checks` | PR 열기와 PR 검사 기다리기 |
+| `gh pr edit`·`gh pr view` | pr-ship이 PR 검사 결과로 본문 첫 칸을 고치고 PR을 봄 |
+| `gh auth status` | pr-ship이 PR을 열기 전에 로그인했는지 봄(읽기만 함) |
+| `git rev-parse`·`git describe`·`git branch --list`·`git branch -r --list`·`git merge-base` | pr-ship이 base(시작 브랜치)를 고르고 갈라진 자리로 확인함(읽기만 함) |
+
+## 실습 3 Hook의 한계
+
+- `stop-ac-tests.mjs`는 이름에 slug가 붙은 테스트만 셉니다. `AC-4 ...`처럼 slug 없이 쓴 이름은 다른 작업의 AC-4와 구별할 수 없어서 세지 않습니다.
+- Skill frontmatter의 Hook은 Skill을 부른 뒤 세션 끝까지 남습니다. 그래서 마지막으로 부른 이 레포의 Skill이 implement일 때만 봅니다.
+- `permissions.ask`는 배송비 규칙 파일 둘(`shipping-fee.ts`, `shipping-policy.ts`)과 이미 적용된 마이그레이션(0001·0002)의 Edit입니다. 새 번호 마이그레이션 추가는 묻지 않습니다. 이미 적용된 마이그레이션은 `protect-files.mjs`가 먼저 막으므로 승인 창보다 거절이 먼저 보입니다.
+- `permissions.ask`의 Edit 규칙은 Edit·Write 도구에만 걸립니다. Bash로 파일을 고치는 명령(`sed -i`)은 승인 창 없이 지나가니, 배송비 같은 위험 경로는 PR 리뷰의 꼭 볼 곳에도 둡니다.

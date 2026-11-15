@@ -2,6 +2,12 @@
 name: implement
 description: 확정된 docs/tasks/<slug>/prd.md를 feat/<slug> 브랜치에서 AC마다 실패하는 테스트부터 구현하고 npm run verify 통과에서 멈춘다. 확정 PRD 구현 요청에 쓴다.
 argument-hint: "<slug>"
+hooks:
+  Stop:
+    - hooks:
+        - type: command
+          command: node "$CLAUDE_PROJECT_DIR/.claude/hooks/stop-ac-tests.mjs"
+          timeout: 30
 ---
 
 작업: $ARGUMENTS
@@ -25,7 +31,7 @@ argument-hint: "<slug>"
 5. `테스트` AC는 실패하는 테스트를 먼저 씁니다. 테스트 이름 맨 앞에 slug와 AC 번호를 넣습니다(예: `it("low-stock-alert AC-2 수량이 안전재고와 같으면 미만이 아니다", ...)`).
    다른 작업의 AC-2와 헷갈리지 않게 slug를 함께 씁니다.
    그 테스트만 돌려 **실패하는 것을 확인한 뒤** 코드를 고쳐 통과시킵니다.
-6. `화면 확인` AC는 화면을 만들고, 화면이 쓰는 API·도메인 동작은 테스트로 받칩니다. 브라우저 확인은 review가 합니다.
+6. `화면 확인` AC는 화면을 만들고, 화면이 쓰는 API·도메인 동작은 테스트로 받칩니다. 그 테스트 이름에도 `<slug> AC-n`을 넣습니다. 브라우저 확인은 review가 합니다.
 7. PRD 범위 안에서만 바꿉니다. 계층 규칙과 고유 규칙 8개를 지킵니다.
    기존 테스트의 기대값은 바꾸지 않습니다. 스키마 변경은 새 번호 마이그레이션으로 합니다.
 
@@ -40,5 +46,8 @@ argument-hint: "<slug>"
     ```
 11. AC마다 테스트 이름(또는 화면 확인으로 남긴 것), verify 통과 줄, 커밋 id를 보고하고 멈춥니다.
     검증은 하지 않습니다. 다음은 `/review <slug>`입니다. 만든 쪽이 스스로 PASS를 선언하지 않습니다.
+
+끝내려 하면 이 Skill의 Stop Hook(`.claude/hooks/stop-ac-tests.mjs`)이 PRD의 AC마다 이름에 `<slug> AC-n`이 든 테스트가 있는지와 지금 코드로 `npm run verify`가 전체 통과했는지 봅니다.
+"AC-4에 테스트 없음"처럼 돌아오면 그 AC의 테스트를 채우고 verify를 다시 돌립니다.
 
 PRD는 고치지 않습니다. PRD가 틀렸다면 사람에게 알리고 `/prd <slug>`로 돌아갑니다.

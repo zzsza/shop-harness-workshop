@@ -9,13 +9,30 @@
       "Bash(npm run grade)",
       "Bash(npm run grade -- *)",
       "Bash(npm test)",
+      "Bash(npm run ci *)",
       "Bash(git status)",
       "Bash(git diff *)",
       "Bash(git log *)",
+      "Bash(git rev-parse *)",
+      "Bash(git describe *)",
+      "Bash(git branch --list *)",
+      "Bash(git branch -r --list *)",
+      "Bash(git merge-base *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(gh pr create *)",
+      "Bash(gh pr checks *)",
+      "Bash(gh pr edit *)",
+      "Bash(gh pr view *)",
+      "Bash(gh auth status)",
       "mcp__playwright"
     ],
     "ask": [
-      "Bash(git push *)"
+      "Edit(./apps/api/src/orders/domain/shipping-fee.ts)",
+      "Edit(./apps/api/src/orders/application/shipping-policy.ts)",
+      "Edit(./packages/db/migrations/0001_init.sql)",
+      "Edit(./packages/db/migrations/0002_restock_movement_kind.sql)"
     ],
     "deny": [
       "Read(./.env)",
@@ -25,7 +42,12 @@
       "Edit(./.env)",
       "Edit(./.env.local)",
       "Edit(./.env.production)",
-      "Edit(./**/.env)"
+      "Edit(./**/.env)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git push * --force*)",
+      "Bash(git push * -f*)",
+      "Bash(gh pr merge *)"
     ]
   },
   "enabledMcpjsonServers": [
@@ -72,6 +94,11 @@
             "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-bash.mjs\"",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/check-review-commit.mjs\"",
+            "timeout": 10
           }
         ]
       },
@@ -94,6 +121,18 @@
             "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/lint-saved-file.mjs\"",
             "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "spec-checker|web-checker|code-reviewer",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/subagent-evidence.mjs\"",
+            "timeout": 10
           }
         ]
       }

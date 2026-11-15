@@ -30,6 +30,7 @@ model: inherit
 ## 돌려줄 것
 
 ```
+검증한 커밋: <HEAD 커밋 id>
 기본 /code-review: 불렀음(지적 N개) | 못 부름(<이유>)
 grade: 통과 | 위반 N개  근거: evidence/grade.txt
 막을 것
@@ -42,3 +43,5 @@ grade: 통과 | 위반 N개  근거: evidence/grade.txt
 ```
 
 막을 것에 위반이 하나라도 있으면 리뷰 판정은 FAIL입니다.
+
+끝내기 전에 SubagentStop Hook(`.claude/hooks/subagent-evidence.mjs`)이 "검증한 커밋" 줄이 지금 HEAD인지, 판정 줄마다 근거가 있는지 봅니다. 빠지면 돌아옵니다.

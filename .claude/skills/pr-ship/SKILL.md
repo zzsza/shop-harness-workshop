@@ -1,6 +1,6 @@
 ---
 name: pr-ship
-description: run/review.md로 PR 본문(PR 검사·AC 표·위험·안 돌린 것·요약)을 docs/tasks/<slug>/run/pr.md에 채우고, FAIL이 없으면 push한 뒤 이 작업이 시작한 day2 브랜치를 base로 PR을 연다. PR 만들기, 올리기 요청에 쓴다.
+description: run/review.md로 PR 본문(PR 검사·AC 표·위험·안 돌린 것·요약)을 docs/tasks/<slug>/run/pr.md에 채우고, FAIL이 없으면 push한 뒤 이 작업이 시작한 day2 브랜치를 base로 PR을 열고, PR 검사 결과를 본문 첫 칸에 적는다. PR 만들기, 올리기 요청에 쓴다.
 argument-hint: "<slug>"
 ---
 
@@ -43,7 +43,7 @@ PR 본문은 사람이 위에서부터 읽다가 막히면 멈추는 순서로 �
 
 템플릿의 다섯 칸을 순서 그대로 `docs/tasks/<slug>/run/pr.md`에 씁니다(이전 것은 덮어씁니다).
 
-1. **PR 검사**: 템플릿의 체크 줄을 그대로 두고, 그 아래에 review.md의 verify 결과를 적습니다. PR 검사 결과는 PR을 연 뒤 GitHub에서 봅니다.
+1. **PR 검사**: 템플릿의 체크 줄을 그대로 두고, 그 아래에 "PR 검사: 기다리는 중"과 review.md의 verify 결과를 적습니다. 결과는 4번에서 채웁니다.
 2. **완료 기준**: PRD 경로와 review.md의 검증한 커밋 id, AC마다 한 줄(AC / 확인 방법 / 결과 / 증거). 증거는 테스트 이름이나 화면 사진 경로입니다. 빈 칸을 두지 않습니다.
 3. **위험**: review.md의 바뀐 파일 중 돈·재고·권한·DB 파일과, 꼭 볼 곳에서 확인한 것.
 4. **안 돌린 것**: review.md의 한계. 없으면 "없음".
@@ -56,5 +56,18 @@ git push -u origin HEAD
 gh pr create --base <base> --title "<PRD 첫 줄 요약>" --body-file docs/tasks/<slug>/run/pr.md
 ```
 
-- `gh`가 없거나 로그인하지 않았으면 push와 PR은 하지 않고, run/pr.md 경로를 알려 주고 멈춥니다.
-- 끝나면 PR 주소를 보고합니다. 머지는 사람이 합니다.
+- `gh`가 없거나 로그인하지 않았으면 push와 PR은 하지 않습니다. 대신 `npm run ci`(기준은 가장 가까운 시작 태그)를 돌려 그 결과를 첫 칸에 적고, run/pr.md 경로를 알려 주고 멈춥니다.
+- `gh pr create` 앞에서 Hook(`.claude/hooks/check-review-commit.mjs`)이 review.md의 검증한 커밋과 HEAD를 비교합니다. 막히면 그 이유를 그대로 보고하고 멈춥니다.
+
+## 4. PR 검사 기다리고 본문 첫 칸 채우기
+
+```bash
+gh pr checks --watch
+```
+
+- 끝날 때까지 기다립니다. PR을 연 직후라 "no checks reported"가 나오면 한 번 더 돌립니다. 그래도 없으면 fork의 Actions가 꺼진 것이니 `docs/github.md`를 가리키고 멈춥니다.
+- 결과를 run/pr.md 첫 칸(PR 검사)에 적습니다.
+  초록이면 체크 줄을 `- [x]`로 바꾸고 "PR 검사: 초록(<검사 이름>)"을 적습니다.
+  빨강이면 체크 줄은 비워 두고 "PR 검사: 빨강"과 실패한 검사 이름, `gh pr checks`가 보인 로그 주소를 적습니다.
+- `gh pr edit --body-file docs/tasks/<slug>/run/pr.md`로 PR 본문을 바꿉니다.
+- 빨강이면 고치지 않고 실패한 검사와 로그 주소를 보고하고 멈춥니다. 초록이면 PR 주소를 보고합니다. 머지는 사람이 합니다.
