@@ -17,7 +17,9 @@
     "deny": [
       "Read(./.env)",
       "Edit(./.env)",
-      "Edit(./data/**)"
+      "Edit(./data/**)",
+      "Edit(./packages/db/migrations/**)",
+      "Edit(./scripts/new-migration.mjs)"
     ],
     "ask": [
       "Bash(npm run db:reset)"
@@ -41,17 +43,6 @@
           {
             "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR/tools/observer/hooks/instructions-loaded.mjs\""
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Edit|Write|Bash|PowerShell",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-migrations.mjs\""
           }
         ]
       }
