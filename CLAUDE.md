@@ -55,7 +55,7 @@
 
 - 일이 끝났다고 말하기 전에 `npm run verify`를 돌려 통과를 확인합니다.
 - 고친 뒤 `npm run grade`로 규칙 위반이 없는지 봅니다.
-- 요구가 모호하면 `/interview` → `/prd` → `/implement` → `/review` 순서로 갑니다. 작업 폴더는 `docs/tasks/<slug>/`입니다(`docs/tasks/README.md`).
+- 요구가 모호하면 `/interview` → `/prd` → `/implement` → `/review` → `/pr-ship` 순서로 갑니다. 작업 폴더는 `docs/tasks/<slug>/`입니다(`docs/tasks/README.md`).
 - 구현한 쪽이 스스로 PASS를 선언하지 않습니다. 검증과 코드 리뷰는 `/review`가 구현 대화를 모르는 서브에이전트로 합니다.
 - 리뷰 기준은 `docs/review-guide.md`입니다.
 - 경로별 세부 규칙은 `.claude/rules/`가 해당 파일을 다룰 때 자동으로 읽힙니다.

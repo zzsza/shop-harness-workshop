@@ -32,6 +32,7 @@
 | 주문 상태 | `apps/api/src/orders/domain/order-status.ts` | 새 전이가 허용 표에 있나, 끝난 상태에서 다시 바뀌지 않나 |
 | 권한 | `apps/api/src/shared/web/session.ts`, `*-controller.ts` | 로그인·역할 확인이 있나, 남의 주문·데이터에 닿을 수 없나 |
 | DB | `packages/db/migrations/` | 새 번호 파일인가, 기존 데이터가 깨지지 않나 |
+| 취소·환불 | `apps/api/src/orders/`, `apps/api/src/inventory/` | 취소·환불은 재고 복구까지 본다: 되돌린 수량만큼 재고가 늘고 이력이 남나, 같은 요청을 두 번 보내도 한 번만 되돌리나 |
 
 ## 의견 (막지 않음)
 

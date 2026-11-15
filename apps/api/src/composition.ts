@@ -52,11 +52,11 @@ export function composeServices({ db, clock }: AppDependencies) {
   const orderRepository = new SqliteOrderRepository(db);
   const orders = new OrderService(orderRepository, catalog, inventory, uow, clock);
   const adminOrders = new AdminOrderService(orderRepository, uow, clock);
-  return { uow, auth, catalog, events, inventory, orders, adminOrders, orderRepository };
+  return { uow, auth, catalog, events, inventory, orders, adminOrders };
 }
 
 export function composeApp(dependencies: AppDependencies): Express {
-  const { auth, catalog, events, inventory, orders, adminOrders, orderRepository } = composeServices(dependencies);
+  const { auth, catalog, events, inventory, orders, adminOrders } = composeServices(dependencies);
   return createApp(createSessionMiddleware(auth), [
     new HealthController(),
     new AuthController(auth),
@@ -64,7 +64,7 @@ export function composeApp(dependencies: AppDependencies): Express {
     new EventController(events),
     new ShippingPolicyController(),
     new OrderController(orders),
-    new MyOrderController(orderRepository),
+    new MyOrderController(orders),
     new AdminOrderController(adminOrders),
     new InventoryController(inventory),
   ]);
