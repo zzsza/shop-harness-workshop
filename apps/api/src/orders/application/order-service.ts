@@ -5,7 +5,8 @@ import { InsufficientStockError, type StockLine, type StockShortage } from "../.
 import type { UnitOfWork } from "../../shared/application/unit-of-work.ts";
 import { DomainError, notFound } from "../../shared/domain/domain-error.ts";
 import type { SessionUser } from "../../shared/domain/session-user.ts";
-import { cancelStatus } from "../domain/order-status.ts";
+import { cancelStatus, type OrderStatus } from "../domain/order-status.ts";
+import { isSameRefund, planRefund, type Refund, type RefundRequest, remainingQuantity } from "../domain/refund.ts";
 import {
   type CartLine,
   formatOrderNumber,
@@ -20,6 +21,13 @@ import {
 
 export interface Quote extends PricedOrder {
   shortages: StockShortage[];
+}
+
+export interface RefundResult {
+  /** 같은 요청 번호의 다시 보낸 요청이면 false(처음 환불을 그대로 돌려준다) */
+  created: boolean;
+  refund: Refund;
+  order: Order;
 }
 
 export interface PlacedOrder {
@@ -95,7 +103,11 @@ export class OrderService {
       if (order === undefined) throw notFound("주문");
       if (order.status === "cancelled") return order;
       const cancelled = cancelStatus(order.status);
-      this.#inventory.restoreForOrder(order.id, stockLines(order));
+      // 부분 환불로 이미 돌아온 수량은 빼고 남은 수량만 되돌린다.
+      const left = order.items
+        .map((item) => ({ productId: item.productId, productName: item.productName, quantity: remainingQuantity(order, item.productId) }))
+        .filter((line) => line.quantity > 0);
+      this.#inventory.restoreForOrder(order.id, left);
       this.#orders.saveStatus(order.id, cancelled, this.#clock.now());
       const saved = this.#orders.findById(order.id);
       if (saved === undefined) throw new Error("방금 취소한 주문을 읽지 못했습니다");
@@ -103,9 +115,37 @@ export class OrderService {
     });
   }
 
-  /** 이 고객의 주문 전부, 최신순 */
-  listForCustomer(customerId: number): Order[] {
-    return this.#orders.listByCustomer(customerId);
+  /**
+   * 내 주문의 일부 상품을 환불한다: 금액 계산 → 재고 복구 → 환불 기록을 한 트랜잭션으로 한다.
+   * 같은 요청 번호로 같은 내용을 다시 보내면 처음 환불을 돌려준다. 남의 주문은 없는 주문처럼 404다.
+   */
+  refund(buyer: SessionUser, orderId: number, request: RefundRequest): RefundResult {
+    return this.#uow.run(() => {
+      const order = this.#orders.findForCustomer(buyer.id, orderId);
+      if (order === undefined) throw notFound("주문");
+      const existing = order.refunds.find((refund) => refund.idempotencyKey === request.idempotencyKey);
+      if (existing !== undefined) {
+        if (!isSameRefund(existing, request)) throw new DomainError("IDEMPOTENCY_KEY_REUSED", "같은 요청 번호로 다른 환불을 보낼 수 없습니다.");
+        return { created: false, refund: existing, order };
+      }
+      const plan = planRefund(order, request);
+      this.#inventory.restoreForOrder(order.id, plan.items);
+      const refund = this.#orders.insertRefund(order.id, {
+        idempotencyKey: request.idempotencyKey,
+        amount: plan.amount,
+        shippingFeeCharged: plan.shippingFeeCharged,
+        items: plan.items.map(({ productId, quantity, lineTotal }) => ({ productId, quantity, lineTotal })),
+        createdAt: this.#clock.now(),
+      });
+      const saved = this.#orders.findById(order.id);
+      if (saved === undefined) throw new Error("방금 환불한 주문을 읽지 못했습니다");
+      return { created: true, refund, order: saved };
+    });
+  }
+
+  /** 이 고객의 주문, 최신순. status를 주면 그 상태인 주문만 */
+  listForCustomer(customerId: number, status: OrderStatus | null): Order[] {
+    return this.#orders.listByCustomer(customerId, status);
   }
 
   /** 이 고객의 주문 한 건. 남의 주문이거나 없으면 NotFound(주문이 있다는 사실도 드러내지 않는다). */

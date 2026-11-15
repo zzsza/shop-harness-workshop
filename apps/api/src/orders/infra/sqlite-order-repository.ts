@@ -3,6 +3,7 @@ import { won } from "@grabmarket/shared";
 import { selectAll } from "../../shared/infra/rows.ts";
 import { INITIAL_ORDER_STATUS, type OrderStatus } from "../domain/order-status.ts";
 import type { AdminOrderRow, NewOrder, Order, OrderRepository, PricedLine } from "../domain/order.ts";
+import type { Refund, RefundLine } from "../domain/refund.ts";
 
 interface OrderRow {
   id: number;
@@ -28,6 +29,22 @@ interface ItemRow {
   product_name: string;
   image_path: string;
   unit_price: number;
+  quantity: number;
+  line_total: number;
+}
+
+interface RefundRow {
+  id: number;
+  order_id: number;
+  idempotency_key: string;
+  amount: number;
+  shipping_fee_charged: number;
+  created_at: string;
+}
+
+interface RefundItemRow {
+  refund_id: number;
+  product_id: number;
   quantity: number;
   line_total: number;
 }
@@ -98,8 +115,13 @@ export class SqliteOrderRepository implements OrderRepository {
     return this.#hydrateOne(selectAll<OrderRow>(this.#db, `${ORDER_SELECT} WHERE o.id = ? AND o.customer_id = ?`, orderId, customerId));
   }
 
-  listByCustomer(customerId: number): Order[] {
-    return this.#hydrate(selectAll<OrderRow>(this.#db, `${ORDER_SELECT} WHERE o.customer_id = ? ORDER BY o.created_at DESC, o.id DESC`, customerId));
+  listByCustomer(customerId: number, status: OrderStatus | null): Order[] {
+    if (status === null) {
+      return this.#hydrate(selectAll<OrderRow>(this.#db, `${ORDER_SELECT} WHERE o.customer_id = ? ORDER BY o.created_at DESC, o.id DESC`, customerId));
+    }
+    return this.#hydrate(
+      selectAll<OrderRow>(this.#db, `${ORDER_SELECT} WHERE o.customer_id = ? AND o.status = ? ORDER BY o.created_at DESC, o.id DESC`, customerId, status),
+    );
   }
 
   listAll(): AdminOrderRow[] {
@@ -124,6 +146,49 @@ export class SqliteOrderRepository implements OrderRepository {
 
   saveStatus(orderId: number, status: OrderStatus, at: Date): void {
     this.#db.prepare("UPDATE orders SET status = ?, updated_at = ? WHERE id = ?").run(status, at.toISOString(), orderId);
+  }
+
+  insertRefund(orderId: number, refund: Omit<Refund, "id">): Refund {
+    const result = this.#db
+      .prepare("INSERT INTO order_refunds (order_id, idempotency_key, amount, shipping_fee_charged, created_at) VALUES (?, ?, ?, ?, ?)")
+      .run(orderId, refund.idempotencyKey, refund.amount, refund.shippingFeeCharged, refund.createdAt.toISOString());
+    const refundId = Number(result.lastInsertRowid);
+    const insertItem = this.#db.prepare("INSERT INTO order_refund_items (refund_id, product_id, quantity, line_total) VALUES (?, ?, ?, ?)");
+    for (const item of refund.items) insertItem.run(refundId, item.productId, item.quantity, item.lineTotal);
+    return { ...refund, id: refundId };
+  }
+
+  /** 주문들의 환불 기록, 주문별로 오래된 순 */
+  #refundsOf(orderIds: number[]): Map<number, Refund[]> {
+    const byOrder = new Map<number, Refund[]>();
+    if (orderIds.length === 0) return byOrder;
+    const placeholders = orderIds.map(() => "?").join(", ");
+    const refunds = selectAll<RefundRow>(
+      this.#db,
+      `SELECT id, order_id, idempotency_key, amount, shipping_fee_charged, created_at FROM order_refunds WHERE order_id IN (${placeholders}) ORDER BY id`,
+      ...orderIds,
+    );
+    if (refunds.length === 0) return byOrder;
+    const items = selectAll<RefundItemRow>(
+      this.#db,
+      `SELECT refund_id, product_id, quantity, line_total FROM order_refund_items WHERE refund_id IN (${refunds.map(() => "?").join(", ")}) ORDER BY id`,
+      ...refunds.map((refund) => refund.id),
+    );
+    for (const row of refunds) {
+      const lines: RefundLine[] = items
+        .filter((item) => item.refund_id === row.id)
+        .map((item) => ({ productId: item.product_id, quantity: item.quantity, lineTotal: won(item.line_total) }));
+      const refund: Refund = {
+        id: row.id,
+        idempotencyKey: row.idempotency_key,
+        amount: won(row.amount),
+        shippingFeeCharged: won(row.shipping_fee_charged),
+        items: lines,
+        createdAt: new Date(row.created_at),
+      };
+      byOrder.set(row.order_id, [...(byOrder.get(row.order_id) ?? []), refund]);
+    }
+    return byOrder;
   }
 
   #hydrateOne(rows: OrderRow[]): Order | undefined {
@@ -152,6 +217,7 @@ export class SqliteOrderRepository implements OrderRepository {
       };
       byOrder.set(item.order_id, [...(byOrder.get(item.order_id) ?? []), line]);
     }
+    const refunds = this.#refundsOf(rows.map((row) => row.id));
     return rows.map((row) => ({
       id: row.id,
       number: row.order_number,
@@ -163,6 +229,7 @@ export class SqliteOrderRepository implements OrderRepository {
       total: won(row.total),
       paymentMethod: row.payment_method,
       shipping: { recipientName: row.recipient_name, phone: row.recipient_phone, address: row.shipping_address },
+      refunds: refunds.get(row.id) ?? [],
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
     }));

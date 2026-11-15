@@ -84,4 +84,15 @@ describe("migrate", () => {
     db.prepare("INSERT INTO inventory_movements (product_id, kind, quantity_delta, quantity_after, created_at) VALUES (1, 'restock', 2, 12, '2026-11-02T00:00:00.000Z')").run();
     expect(() => db.prepare("INSERT INTO inventory_movements (product_id, kind, quantity_delta, quantity_after, created_at) VALUES (1, 'other', 1, 13, '2026-11-02T00:00:00.000Z')").run()).toThrow();
   });
+
+  it("partial-refund AC-14 0003은 0002까지 적용된 DB에 환불 표를 더하고 기존 주문을 그대로 둔다", () => {
+    const db = openMemoryDatabase();
+    const files = Object.fromEntries(loadMigrations().filter((migration) => migration.version <= 2).map((migration) => [`${String(migration.version).padStart(4, "0")}_${migration.name}.sql`, migration.sql]));
+    migrate(db, clock, migrationsDir(files));
+
+    expect(migrate(db, clock)).toContain(3);
+
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'order_refund%' ORDER BY name").all();
+    expect(tables).toEqual([{ name: "order_refund_items" }, { name: "order_refunds" }]);
+  });
 });

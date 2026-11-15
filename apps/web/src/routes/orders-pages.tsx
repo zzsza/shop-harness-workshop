@@ -1,4 +1,14 @@
-import { type MyOrderDetail, type OrderDetail, type OrderSummary, OrderParamsSchema, PAYMENT_METHOD_LABELS } from "@grabmarket/contracts";
+import {
+  type MyOrderDetail,
+  MyOrderListQuerySchema,
+  ORDER_STATUS_LABELS,
+  type OrderDetail,
+  type OrderStatus,
+  type OrderSummary,
+  OrderParamsSchema,
+  PAYMENT_METHOD_LABELS,
+  type RefundResponse,
+} from "@grabmarket/contracts";
 import { useEffect, useState } from "react";
 import { Form, Link, type LoaderFunctionArgs, useLoaderData } from "react-router";
 import { streamed } from "../lib/streamed.ts";
@@ -8,6 +18,7 @@ import { Icon } from "../components/icon.tsx";
 import { Loaded } from "../components/loaded.tsx";
 import { OrderLines } from "../components/order-lines.tsx";
 import { OrderSteps } from "../components/order-steps.tsx";
+import { QuantityStepper } from "../components/quantity-stepper.tsx";
 import { Page } from "../components/page.tsx";
 import { Bone, EmptyState } from "../components/states.tsx";
 import { StatusBadge } from "../components/status-badge.tsx";
@@ -21,12 +32,16 @@ export function summarize(order: Pick<OrderSummary, "firstItemName" | "itemCount
 
 // ---- 내 주문 목록 ----
 
-export function myOrdersLoader() {
-  return { result: streamed(callApi("listMyOrders")) };
+/** 주소의 ?status=로 상태를 걸러 본다. 새로고침해도 남고, 없는 상태 값이면 찾을 수 없는 화면이다. */
+export function myOrdersLoader({ request }: LoaderFunctionArgs) {
+  const parsed = MyOrderListQuerySchema.safeParse(Object.fromEntries(new URL(request.url).searchParams));
+  if (!parsed.success) throw new NotFoundError("찾을 수 없는 주문 상태입니다");
+  const status = parsed.data.status ?? null;
+  return { status, result: streamed(callApi("listMyOrders", { query: { status: status ?? undefined } })) };
 }
 
 export function MyOrdersPage() {
-  const { result } = useLoaderData<typeof myOrdersLoader>();
+  const { status, result } = useLoaderData<typeof myOrdersLoader>();
   return (
     <Page>
       <Loaded
@@ -35,6 +50,7 @@ export function MyOrdersPage() {
         skeleton={
           <>
             <Heading />
+            <StatusFilter current={status} />
             <div aria-hidden="true" className="flex flex-col gap-3 rounded-md border border-line bg-ground p-4">
               <Bone className="h-10 w-full" />
               <Bone className="h-10 w-full" />
@@ -45,8 +61,17 @@ export function MyOrdersPage() {
       >
         {({ orders }) => (
           <>
-            <Heading count={orders.length} />
-            {orders.length === 0 ? (
+            <Heading count={orders.length} status={status} />
+            <StatusFilter current={status} />
+            {orders.length === 0 && status !== null ? (
+              <div className="rounded-md border border-line bg-ground">
+                <EmptyState title={`${ORDER_STATUS_LABELS[status]} 주문이 없어요`} hint="다른 상태를 골라 보세요">
+                  <LinkButton to="/orders" variant="secondary" size="lg">
+                    전체 보기
+                  </LinkButton>
+                </EmptyState>
+              </div>
+            ) : orders.length === 0 ? (
               <div className="rounded-md border border-line bg-ground">
                 <EmptyState title="아직 주문한 상품이 없어요" hint="마음에 드는 상품을 담아 주문해 보세요">
                   <LinkButton to="/" size="lg">
@@ -83,12 +108,40 @@ function MobileFooter() {
   );
 }
 
-function Heading({ count }: { count?: number }) {
+function Heading({ count, status = null }: { count?: number; status?: OrderStatus | null }) {
   return (
     <h1 className="mb-4 flex items-baseline gap-2 text-xl leading-8 font-extrabold text-ink">
       내 주문
-      {count !== undefined && <span className="text-sm leading-5 font-semibold text-ink-2">전체 {count}건</span>}
+      {count !== undefined && (
+        <span className="text-sm leading-5 font-semibold text-ink-2">
+          {status === null ? "전체" : ORDER_STATUS_LABELS[status]} {count}건
+        </span>
+      )}
     </h1>
+  );
+}
+
+const STATUS_FILTERS: (OrderStatus | null)[] = [null, "paid", "preparing", "shipping", "delivered", "cancelled"];
+
+/** 상태 필터. 고른 상태는 주소(?status=)에 남는다. */
+function StatusFilter({ current }: { current: OrderStatus | null }) {
+  return (
+    <nav aria-label="주문 상태" className="mb-3 flex gap-2 overflow-x-auto pb-1">
+      {STATUS_FILTERS.map((status) => {
+        const selected = status === current;
+        return (
+          <Link
+            key={status ?? "all"}
+            to={status === null ? "/orders" : `/orders?status=${status}`}
+            replace
+            aria-current={selected ? "page" : undefined}
+            className={`flex h-9 shrink-0 items-center rounded-sm border px-3 text-sm font-bold ${selected ? "border-ink bg-ink text-on-dark" : "border-line bg-ground text-ink"}`}
+          >
+            {status === null ? "전체" : ORDER_STATUS_LABELS[status]}
+          </Link>
+        );
+      })}
+    </nav>
   );
 }
 
@@ -181,6 +234,8 @@ function MyOrderView({ initial }: { initial: MyOrderDetail }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cancelledNow, setCancelledNow] = useState(false);
+  const [refunding, setRefunding] = useState(false);
+  const [refundNotice, setRefundNotice] = useState<string | null>(null);
 
   async function cancel() {
     setPending(true);
@@ -243,13 +298,37 @@ function MyOrderView({ initial }: { initial: MyOrderDetail }) {
               <dt className="font-bold text-ink">결제 금액</dt>
               <dd className="text-2xl leading-9 font-extrabold text-ink">{krw(order.total)}</dd>
             </div>
+            {order.refundedAmount > 0 && (
+              <div className="mb-3 flex justify-between">
+                <dt className="text-ink-3">환불한 금액</dt>
+                <dd className="font-semibold text-danger">{krw(order.refundedAmount)}</dd>
+              </div>
+            )}
           </dl>
           <MethodRows order={order} />
-          {order.cancellable && (
+          {order.refundable && (
             <Button
               variant="secondary"
               size="lg"
               className="mt-6 w-full"
+              onClick={() => {
+                setRefundNotice(null);
+                setRefunding(true);
+              }}
+            >
+              부분 환불
+            </Button>
+          )}
+          {refundNotice !== null && (
+            <p role="status" className="mt-4 rounded-sm bg-soldout-bg px-3 py-2 text-xs-plus font-semibold text-soldout-text">
+              {refundNotice}
+            </p>
+          )}
+          {order.cancellable && (
+            <Button
+              variant="secondary"
+              size="lg"
+              className={`${order.refundable ? "mt-2" : "mt-6"} w-full`}
               onClick={() => {
                 setConfirming(true);
               }}
@@ -269,6 +348,22 @@ function MyOrderView({ initial }: { initial: MyOrderDetail }) {
           )}
         </aside>
       </div>
+      {refunding && (
+        <RefundDialog
+          order={order}
+          onClose={() => {
+            setRefunding(false);
+          }}
+          onDone={(response) => {
+            setOrder(response.order);
+            setRefunding(false);
+            const fee = response.refund.shippingFeeCharged;
+            setRefundNotice(
+              `${krw(response.refund.amount)}을 환불했어요.${fee > 0 ? ` 남은 상품이 무료배송 기준보다 적어 배송비 ${krw(fee)}을 뺐어요.` : ""} 교육용 가상 결제라 실제 환불은 없어요.`,
+            );
+          }}
+        />
+      )}
       {confirming && (
         <CancelConfirm
           pending={pending}
@@ -279,6 +374,81 @@ function MyOrderView({ initial }: { initial: MyOrderDetail }) {
         />
       )}
     </>
+  );
+}
+
+/** 부분 환불: 상품별 환불 수량을 고른다. 금액은 서버가 정하고, 결과를 받은 뒤에 보인다. */
+function RefundDialog({ order, onClose, onDone }: { order: OrderDetail; onClose: () => void; onDone: (response: RefundResponse) => void }) {
+  // 같은 창에서 다시 눌러도 한 번만 환불되게 요청 번호를 창마다 하나 만든다.
+  const [idempotencyKey] = useState(() => crypto.randomUUID());
+  const [quantities, setQuantities] = useState<Record<number, number>>({});
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const lines = order.items.filter((item) => item.quantity - item.refundedQuantity > 0);
+  const chosen = lines.map((item) => ({ productId: item.productId, quantity: quantities[item.productId] ?? 0 })).filter((line) => line.quantity > 0);
+
+  useEffect(() => {
+    const close = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("keydown", close);
+    };
+  }, [onClose]);
+
+  async function submit() {
+    setPending(true);
+    setError(null);
+    try {
+      onDone(await callApi("refundMyOrder", { params: { orderId: order.id }, body: { idempotencyKey, items: chosen } }));
+    } catch (caught) {
+      if (!isApiError(caught)) throw caught;
+      setError(caught.message);
+      setPending(false);
+    }
+  }
+
+  return (
+    <div role="dialog" aria-modal="true" aria-labelledby="refund-title" className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div aria-hidden="true" onClick={onClose} className="absolute inset-0 bg-scrim" />
+      <div className="relative w-full max-w-110 rounded-md bg-ground p-6">
+        <h2 id="refund-title" className="text-lg font-extrabold text-ink">
+          환불할 상품을 골라 주세요
+        </h2>
+        <p className="mt-2 text-sm text-ink-2">남은 상품 금액이 무료배송 기준보다 적어지면 배송비를 빼고 환불해요.</p>
+        <ul className="mt-4 flex flex-col gap-3">
+          {lines.map((item) => (
+            <li key={item.productId} className="flex items-center justify-between gap-3">
+              <span className="min-w-0 truncate text-sm font-semibold text-ink">{item.productName}</span>
+              <QuantityStepper
+                label={item.productName}
+                min={0}
+                max={item.quantity - item.refundedQuantity}
+                value={quantities[item.productId] ?? 0}
+                disabled={pending}
+                onChange={(value) => {
+                  setQuantities((current) => ({ ...current, [item.productId]: value }));
+                }}
+              />
+            </li>
+          ))}
+        </ul>
+        {error !== null && (
+          <p role="alert" className="mt-4 rounded-sm bg-danger-soft px-3 py-2 text-xs-plus font-semibold text-danger">
+            {error}
+          </p>
+        )}
+        <div className="mt-6 flex gap-2">
+          <Button variant="secondary" size="lg" className="flex-1" disabled={pending} onClick={onClose}>
+            돌아가기
+          </Button>
+          <Button size="lg" className="flex-1" disabled={pending || chosen.length === 0} onClick={() => void submit()}>
+            {pending ? "환불하는 중" : "환불하기"}
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
 

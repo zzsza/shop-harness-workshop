@@ -1,4 +1,4 @@
-import { type MyOrderListResponse, OrderParamsSchema, ROUTES } from "@grabmarket/contracts";
+import { MyOrderListQuerySchema, type MyOrderListResponse, OrderParamsSchema, ROUTES } from "@grabmarket/contracts";
 import type { Router } from "express";
 import type { Controller } from "../../shared/web/controller.ts";
 import { requireCustomer } from "../../shared/web/session.ts";
@@ -14,9 +14,10 @@ export class MyOrderController implements Controller {
   }
 
   register(router: Router): void {
-    router.get(ROUTES.orders, (_req, res) => {
+    router.get(ROUTES.orders, (req, res) => {
       const user = requireCustomer(res);
-      const orders = this.#orders.listForCustomer(user.id);
+      const { status } = MyOrderListQuerySchema.parse(req.query);
+      const orders = this.#orders.listForCustomer(user.id, status ?? null);
       res.json({ orders: orders.map(toOrderSummaryDto) } satisfies MyOrderListResponse);
     });
 

@@ -7,14 +7,19 @@ import { InboundRequestSchema, InboundResponseSchema, InventoryListResponseSchem
 import {
   AdminOrderListResponseSchema,
   AdminOrderResponseSchema,
+  BulkChangeOrderStatusRequestSchema,
+  BulkChangeOrderStatusResponseSchema,
   ChangeOrderStatusRequestSchema,
   CreateOrderRequestSchema,
+  MyOrderListQuerySchema,
   MyOrderListResponseSchema,
   MyOrderResponseSchema,
   OrderParamsSchema,
   OrderQuoteRequestSchema,
   OrderQuoteResponseSchema,
   OrderResponseSchema,
+  RefundRequestSchema,
+  RefundResponseSchema,
 } from "./orders.ts";
 import { ROUTES } from "./routes.ts";
 import { ShippingPolicyResponseSchema } from "./shipping.ts";
@@ -52,13 +57,15 @@ export const ENDPOINTS = {
   getShippingPolicy: { method: "GET", path: ROUTES.shippingPolicy, access: "public", response: ShippingPolicyResponseSchema },
   quoteOrder: { method: "POST", path: ROUTES.orderQuote, access: "public", body: OrderQuoteRequestSchema, response: OrderQuoteResponseSchema },
   createOrder: { method: "POST", path: ROUTES.orders, access: "customer", body: CreateOrderRequestSchema, response: OrderResponseSchema },
-  listMyOrders: { method: "GET", path: ROUTES.orders, access: "customer", response: MyOrderListResponseSchema },
+  listMyOrders: { method: "GET", path: ROUTES.orders, access: "customer", query: MyOrderListQuerySchema, response: MyOrderListResponseSchema },
   getMyOrder: { method: "GET", path: ROUTES.order, access: "customer", params: OrderParamsSchema, response: MyOrderResponseSchema },
   cancelMyOrder: { method: "POST", path: ROUTES.orderCancel, access: "customer", params: OrderParamsSchema, response: OrderResponseSchema },
+  refundMyOrder: { method: "POST", path: ROUTES.orderRefunds, access: "customer", params: OrderParamsSchema, body: RefundRequestSchema, response: RefundResponseSchema },
 
   listAdminOrders: { method: "GET", path: ROUTES.adminOrders, access: "admin", response: AdminOrderListResponseSchema },
   getAdminOrder: { method: "GET", path: ROUTES.adminOrder, access: "admin", params: OrderParamsSchema, response: AdminOrderResponseSchema },
   changeOrderStatus: { method: "POST", path: ROUTES.adminOrderStatus, access: "admin", params: OrderParamsSchema, body: ChangeOrderStatusRequestSchema, response: AdminOrderResponseSchema },
+  changeOrderStatusMany: { method: "POST", path: ROUTES.adminOrderBulkStatus, access: "admin", body: BulkChangeOrderStatusRequestSchema, response: BulkChangeOrderStatusResponseSchema },
 
   listInventory: { method: "GET", path: ROUTES.adminInventory, access: "admin", response: InventoryListResponseSchema },
   listInventoryMovements: { method: "GET", path: ROUTES.adminInventoryMovements, access: "admin", params: InventoryParamsSchema, response: InventoryMovementsResponseSchema },

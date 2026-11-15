@@ -1,6 +1,7 @@
 import { addMoney, type Money, multiplyMoney, sumMoney } from "@grabmarket/shared";
 import { calculateShippingFee } from "./shipping-fee.ts";
 import type { OrderStatus } from "./order-status.ts";
+import type { Refund } from "./refund.ts";
 
 export interface CartLine {
   productId: number;
@@ -45,6 +46,8 @@ export interface Order extends PricedOrder {
   status: OrderStatus;
   paymentMethod: "virtual";
   shipping: ShippingInfo;
+  /** 부분 환불 기록, 오래된 순 */
+  refunds: Refund[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -128,9 +131,10 @@ export interface OrderRepository {
   findById(orderId: number): Order | undefined;
   /** 이 고객의 주문만. 남의 주문이면 undefined */
   findForCustomer(customerId: number, orderId: number): Order | undefined;
-  /** 이 고객의 주문 전부, 최신순 */
-  listByCustomer(customerId: number): Order[];
+  /** 이 고객의 주문, 최신순. status가 null이 아니면 그 상태인 주문만 */
+  listByCustomer(customerId: number, status: OrderStatus | null): Order[];
   /** 전체 주문, 최신순. 필터·페이지 없음 */
   listAll(): AdminOrderRow[];
   saveStatus(orderId: number, status: OrderStatus, at: Date): void;
+  insertRefund(orderId: number, refund: Omit<Refund, "id">): Refund;
 }

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DateTimeSchema, IdempotencyKeySchema, IdSchema, MoneySchema, StockShortageSchema } from "./common.ts";
+import { DateTimeSchema, ErrorCodeSchema, IdempotencyKeySchema, IdSchema, MoneySchema, StockShortageSchema } from "./common.ts";
 
 /**
  * 주문 상태. 관리자는 다음 단계로만 넘긴다: paid → preparing → shipping → delivered.
@@ -92,6 +92,8 @@ export const OrderItemSchema = z.object({
   unitPrice: MoneySchema,
   quantity: z.number().int().positive(),
   lineTotal: MoneySchema,
+  /** 이 상품을 지금까지 부분 환불한 수량. 없으면 0 */
+  refundedQuantity: z.number().int().nonnegative(),
 });
 export type OrderItem = z.infer<typeof OrderItemSchema>;
 
@@ -102,6 +104,10 @@ export const OrderDetailSchema = z.object({
   status: OrderStatusSchema,
   /** 지금 고객이 취소할 수 있는 주문인지(결제완료·배송준비). 서버가 정하고 화면은 그대로 쓴다. */
   cancellable: z.boolean(),
+  /** 지금 부분 환불할 수 있는지(결제완료·배송준비이고 남은 상품 수량 합이 2개 이상). 서버가 정한다. */
+  refundable: z.boolean(),
+  /** 지금까지 부분 환불한 금액 합. 없으면 0 */
+  refundedAmount: MoneySchema,
   items: z.array(OrderItemSchema),
   subtotal: MoneySchema,
   shippingFee: MoneySchema,
@@ -135,7 +141,11 @@ export const OrderSummarySchema = z.object({
 });
 export type OrderSummary = z.infer<typeof OrderSummarySchema>;
 
-/** GET /api/orders (고객 로그인 필요). 내 주문 전부, 최신순. 페이지 나누기·필터 없음 */
+/** GET /api/orders?status=<상태>의 쿼리. status가 없으면 전부, 있으면 그 상태인 주문만. 없는 상태 값은 400 VALIDATION_FAILED */
+export const MyOrderListQuerySchema = z.object({ status: OrderStatusSchema.optional() });
+export type MyOrderListQuery = z.infer<typeof MyOrderListQuerySchema>;
+
+/** GET /api/orders (고객 로그인 필요). 내 주문(상태 필터를 주면 그 상태만), 최신순. 페이지 나누기 없음 */
 export const MyOrderListResponseSchema = z.object({ orders: z.array(OrderSummarySchema) });
 export type MyOrderListResponse = z.infer<typeof MyOrderListResponseSchema>;
 
@@ -149,6 +159,36 @@ export const OrderParamsSchema = z.object({ orderId: z.coerce.number().int().pos
  * 이미 취소된 주문을 다시 보내면 200과 같은 주문(재고는 한 번만 늘어난다).
  * 실패: 401 UNAUTHENTICATED, 403 FORBIDDEN(관리자), 404 NOT_FOUND(남의 주문 포함), 409 ORDER_NOT_CANCELLABLE(배송중·배송완료).
  */
+
+/**
+ * POST /api/orders/:orderId/refunds (고객 로그인 필요) → RefundResponseSchema. docs/tasks/partial-refund/prd.md의 API 절.
+ * 201 새 환불, 같은 idempotencyKey로 같은 내용을 다시 보내면 200과 처음 환불.
+ * 실패: 400 VALIDATION_FAILED, 401 UNAUTHENTICATED, 403 FORBIDDEN(관리자), 404 NOT_FOUND(남의 주문 포함),
+ * 409 ORDER_NOT_REFUNDABLE, REFUND_QUANTITY_EXCEEDED, REFUND_ALL_ITEMS, REFUND_AMOUNT_NOT_POSITIVE, IDEMPOTENCY_KEY_REUSED.
+ */
+export const RefundRequestSchema = z.object({
+  idempotencyKey: IdempotencyKeySchema,
+  items: z
+    .array(z.object({ productId: IdSchema, quantity: z.number().int().min(1).max(99) }))
+    .min(1)
+    .max(50)
+    .refine((lines) => new Set(lines.map((line) => line.productId)).size === lines.length, { message: "같은 상품이 두 번 들어 있습니다" }),
+});
+export type RefundRequest = z.infer<typeof RefundRequestSchema>;
+
+export const RefundSchema = z.object({
+  id: IdSchema,
+  /** 돌려준 금액 = items의 lineTotal 합 - shippingFeeCharged */
+  amount: MoneySchema,
+  /** 남은 금액이 무료배송 기준 아래로 내려가 이번 환불에서 뺀 배송비. 빼지 않았으면 0 */
+  shippingFeeCharged: MoneySchema,
+  items: z.array(z.object({ productId: IdSchema, quantity: z.number().int().positive(), lineTotal: MoneySchema })),
+  createdAt: DateTimeSchema,
+});
+export type Refund = z.infer<typeof RefundSchema>;
+
+export const RefundResponseSchema = z.object({ refund: RefundSchema, order: OrderDetailSchema });
+export type RefundResponse = z.infer<typeof RefundResponseSchema>;
 
 // ---- 관리자 ----
 
@@ -190,3 +230,31 @@ export type AdminOrderResponse = z.infer<typeof AdminOrderResponseSchema>;
  */
 export const ChangeOrderStatusRequestSchema = z.object({ status: OrderStatusSchema });
 export type ChangeOrderStatusRequest = z.infer<typeof ChangeOrderStatusRequestSchema>;
+
+/**
+ * POST /api/admin/orders/bulk-status (관리자) → BulkChangeOrderStatusResponseSchema.
+ * 주문마다 한 건씩 바꿀 때와 같은 규칙으로 따로 처리한다. 안 되는 주문이 있어도 나머지는 바꾼다.
+ * 같은 주문 번호가 두 번이거나 0건·101건 이상이면 400 VALIDATION_FAILED.
+ */
+export const BulkChangeOrderStatusRequestSchema = z.object({
+  orderIds: z
+    .array(IdSchema)
+    .min(1)
+    .max(100)
+    .refine((ids) => new Set(ids).size === ids.length, { message: "같은 주문이 두 번 들어 있습니다" }),
+  status: OrderStatusSchema,
+});
+export type BulkChangeOrderStatusRequest = z.infer<typeof BulkChangeOrderStatusRequestSchema>;
+
+/** 주문 한 건의 처리 결과. status는 처리한 뒤의 상태(없는 주문이면 null), 실패면 code에 한 건씩 바꿀 때와 같은 오류 코드 */
+export const BulkStatusResultSchema = z.object({
+  orderId: IdSchema,
+  ok: z.boolean(),
+  status: OrderStatusSchema.nullable(),
+  code: ErrorCodeSchema.nullable(),
+});
+export type BulkStatusResult = z.infer<typeof BulkStatusResultSchema>;
+
+/** 요청한 순서대로 한 줄씩 */
+export const BulkChangeOrderStatusResponseSchema = z.object({ results: z.array(BulkStatusResultSchema) });
+export type BulkChangeOrderStatusResponse = z.infer<typeof BulkChangeOrderStatusResponseSchema>;

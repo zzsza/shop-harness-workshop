@@ -1,6 +1,17 @@
-import type { AdminOrderListResponse, AdminOrderResponse, MyOrderResponse, OrderDetail, OrderQuoteResponse, OrderResponse, OrderSummary } from "@grabmarket/contracts";
-import type { AdminOrderView } from "../application/admin-order-service.ts";
-import type { Quote } from "../application/order-service.ts";
+import type {
+  AdminOrderListResponse,
+  AdminOrderResponse,
+  BulkChangeOrderStatusResponse,
+  MyOrderResponse,
+  OrderDetail,
+  OrderQuoteResponse,
+  OrderResponse,
+  OrderSummary,
+  RefundResponse,
+} from "@grabmarket/contracts";
+import type { AdminOrderView, BulkStatusOutcome } from "../application/admin-order-service.ts";
+import type { Quote, RefundResult } from "../application/order-service.ts";
+import { isRefundable, refundedAmount, refundedQuantity } from "../domain/refund.ts";
 import type { AdminOrderRow, Order } from "../domain/order.ts";
 import { canCancel } from "../domain/order-status.ts";
 
@@ -10,6 +21,8 @@ export function toOrderDetailDto(order: Order): OrderDetail {
     orderNumber: order.number,
     status: order.status,
     cancellable: canCancel(order.status),
+    refundable: isRefundable(order),
+    refundedAmount: refundedAmount(order),
     items: order.items.map((item) => ({
       productId: item.productId,
       productName: item.productName,
@@ -17,6 +30,7 @@ export function toOrderDetailDto(order: Order): OrderDetail {
       unitPrice: item.unitPrice,
       quantity: item.quantity,
       lineTotal: item.lineTotal,
+      refundedQuantity: refundedQuantity(order, item.productId),
     })),
     subtotal: order.subtotal,
     shippingFee: order.shippingFee,
@@ -86,4 +100,21 @@ export function toAdminOrderListDto(rows: AdminOrderRow[]): AdminOrderListRespon
 
 export function toAdminOrderDto({ order, nextStatus }: AdminOrderView): AdminOrderResponse {
   return { order: { ...toOrderDetailDto(order), customer: order.customer, nextStatus } };
+}
+
+export function toBulkStatusDto(outcomes: BulkStatusOutcome[]): BulkChangeOrderStatusResponse {
+  return { results: outcomes.map(({ orderId, ok, status, code }) => ({ orderId, ok, status, code })) };
+}
+
+export function toRefundResponse({ refund, order }: RefundResult): RefundResponse {
+  return {
+    refund: {
+      id: refund.id,
+      amount: refund.amount,
+      shippingFeeCharged: refund.shippingFeeCharged,
+      items: refund.items.map((item) => ({ productId: item.productId, quantity: item.quantity, lineTotal: item.lineTotal })),
+      createdAt: refund.createdAt.toISOString(),
+    },
+    order: toOrderDetailDto(order),
+  };
 }

@@ -33,6 +33,14 @@ export const ErrorCodeSchema = z.enum([
   "INVALID_STATUS_TRANSITION",
   /** 409 취소할 수 없는 상태의 주문이다(배송중·배송완료). 주문과 재고는 바뀌지 않는다. */
   "ORDER_NOT_CANCELLABLE",
+  /** 409 부분 환불할 수 없는 상태의 주문이다(배송중·배송완료·주문취소). */
+  "ORDER_NOT_REFUNDABLE",
+  /** 409 환불할 수 있는 수량보다 많거나 주문에 없는 상품이다. */
+  "REFUND_QUANTITY_EXCEEDED",
+  /** 409 환불하면 남는 상품이 없다. 전부는 주문 취소로 한다. */
+  "REFUND_ALL_ITEMS",
+  /** 409 배송비를 빼면 환불 금액이 0원 이하다. */
+  "REFUND_AMOUNT_NOT_POSITIVE",
   /** 409 같은 멱등 키로 다른 내용의 요청을 보냈다. */
   "IDEMPOTENCY_KEY_REUSED",
   /** 500 서버 오류. 자세한 내용은 서버 로그에만 남는다. */

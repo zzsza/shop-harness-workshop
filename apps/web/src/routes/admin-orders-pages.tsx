@@ -2,6 +2,7 @@ import { streamed } from "../lib/streamed.ts";
 import {
   type AdminOrderDetail,
   type AdminOrderRow,
+  type BulkStatusResult,
   OrderParamsSchema,
   ORDER_STATUS_LABELS,
   PAYMENT_METHOD_LABELS,
@@ -11,6 +12,7 @@ import { memo, useCallback, useState } from "react";
 import { Link, type LoaderFunctionArgs, useLoaderData } from "react-router";
 import { type ApiError, callApi, isApiError } from "../api/client.ts";
 import { Button, LinkButton } from "../components/button.tsx";
+import { Checkbox } from "../components/checkbox.tsx";
 import { Icon } from "../components/icon.tsx";
 import { Loaded } from "../components/loaded.tsx";
 import { OrderLines } from "../components/order-lines.tsx";
@@ -29,6 +31,16 @@ function nextOf(status: OrderStatus): OrderStatus | null {
   // 취소된 주문처럼 흐름 밖의 상태에는 다음 단계가 없다.
   return index === -1 ? null : (FLOW[index + 1] ?? null);
 }
+
+/** 일괄 변경에서 안 넘어간 이유. 서버가 준 오류 코드를 화면 글로 옮긴다. */
+function bulkFailureText(result: BulkStatusResult): string {
+  if (result.code === "INVALID_STATUS_TRANSITION") return "바로 다음 단계가 아니에요";
+  if (result.code === "NOT_FOUND") return "주문을 찾지 못했어요";
+  return "변경하지 못했어요";
+}
+
+/** 일괄 변경으로 고를 수 있는 상태. 결제완료는 처음 상태라 고를 일이 없고, 취소는 고객만 한다. */
+const BULK_TARGETS: OrderStatus[] = ["preparing", "shipping", "delivered"];
 
 function without<T>(set: ReadonlySet<T>, value: T): Set<T> {
   const next = new Set(set);
@@ -79,6 +91,40 @@ function OrderTable({ orders }: { orders: AdminOrderRow[] }) {
   const [statuses, setStatuses] = useState<Record<number, OrderStatus>>({});
   const [busy, setBusy] = useState<ReadonlySet<number>>(new Set());
   const [failed, setFailed] = useState<ReadonlySet<number>>(new Set());
+  const [selected, setSelected] = useState<ReadonlySet<number>>(new Set());
+  const [bulkTarget, setBulkTarget] = useState<OrderStatus>("preparing");
+  const [bulkPending, setBulkPending] = useState(false);
+  const [bulkReport, setBulkReport] = useState<string | null>(null);
+  const [reasons, setReasons] = useState<Record<number, string>>({});
+
+  const select = useCallback((id: number, checked: boolean) => {
+    setSelected((current) => (checked ? new Set(current).add(id) : without(current, id)));
+  }, []);
+
+  function changeSelected() {
+    const ids = orders.filter((order) => selected.has(order.id)).map((order) => order.id);
+    setBulkPending(true);
+    setBulkReport(null);
+    callApi("changeOrderStatusMany", { body: { orderIds: ids, status: bulkTarget } }).then(
+      ({ results }) => {
+        const changed = results.filter((result) => result.ok);
+        const refused = results.filter((result) => !result.ok);
+        setStatuses((current) => {
+          const next = { ...current };
+          for (const result of results) if (result.status !== null) next[result.orderId] = result.status;
+          return next;
+        });
+        setReasons(Object.fromEntries(refused.map((result) => [result.orderId, bulkFailureText(result)])));
+        setSelected(new Set(refused.map((result) => result.orderId)));
+        setBulkReport(refused.length === 0 ? `${String(changed.length)}건을 바꿨어요` : `${String(changed.length)}건을 바꿨고 ${String(refused.length)}건은 바꾸지 못했어요`);
+        setBulkPending(false);
+      },
+      (error: unknown) => {
+        setBulkReport(isApiError(error) ? error.message : "상태를 바꾸지 못했어요");
+        setBulkPending(false);
+      },
+    );
+  }
 
   const advance = useCallback((id: number, to: OrderStatus) => {
     setBusy((current) => new Set(current).add(id));
@@ -110,11 +156,45 @@ function OrderTable({ orders }: { orders: AdminOrderRow[] }) {
   return (
     <>
       <Heading count={orders.length} />
+      <div role="group" aria-label="선택한 주문" className="mb-3 flex min-h-10 flex-wrap items-center gap-3 text-sm">
+        <span className="font-bold text-ink">{selected.size}건 선택</span>
+        <select
+          aria-label="바꿀 상태"
+          value={bulkTarget}
+          onChange={(event) => {
+            setBulkTarget(event.target.value as OrderStatus);
+          }}
+          className="h-9 rounded-md border border-line bg-ground px-3 font-semibold text-ink"
+        >
+          {BULK_TARGETS.map((status) => (
+            <option key={status} value={status}>
+              {ORDER_STATUS_LABELS[status]}
+            </option>
+          ))}
+        </select>
+        <Button size="sm" disabled={selected.size === 0 || bulkPending} onClick={changeSelected}>
+          {bulkPending ? "바꾸는 중" : "선택한 주문 바꾸기"}
+        </Button>
+        {bulkReport !== null && (
+          <span role="status" className="font-semibold text-ink-2">
+            {bulkReport}
+          </span>
+        )}
+      </div>
       <div className="overflow-x-auto rounded-md border border-line bg-ground">
         <table className="w-full min-w-225 border-collapse text-left text-sm">
           <thead>
             <tr className="h-10 text-xs-plus text-ink-3">
-              <th scope="col" className={`${th} px-6`}>
+              <th scope="col" className={`${th} pl-6`}>
+                <Checkbox
+                  label="모든 주문 선택"
+                  checked={selected.size === orders.length}
+                  onChange={(checked) => {
+                    setSelected(checked ? new Set(orders.map((order) => order.id)) : new Set());
+                  }}
+                />
+              </th>
+              <th scope="col" className={`${th} px-3`}>
                 주문번호
               </th>
               <th scope="col" className={`${th} px-3`}>
@@ -145,7 +225,10 @@ function OrderTable({ orders }: { orders: AdminOrderRow[] }) {
                 status={statuses[order.id] ?? order.status}
                 busy={busy.has(order.id)}
                 failed={failed.has(order.id)}
+                selected={selected.has(order.id)}
+                reason={reasons[order.id] ?? null}
                 onAdvance={advance}
+                onSelect={select}
               />
             ))}
           </tbody>
@@ -160,18 +243,34 @@ const OrderRow = memo(function OrderRow({
   status,
   busy,
   failed,
+  selected,
+  reason,
   onAdvance,
+  onSelect,
 }: {
   order: AdminOrderRow;
   status: OrderStatus;
   busy: boolean;
   failed: boolean;
+  selected: boolean;
+  /** 일괄 변경에서 안 넘어간 이유 */
+  reason: string | null;
   onAdvance: (id: number, to: OrderStatus) => void;
+  onSelect: (id: number, checked: boolean) => void;
 }) {
   const next = nextOf(status);
   return (
     <tr className="h-12 border-t border-line">
-      <td className="px-6 font-extrabold text-ink">
+      <td className="pl-6">
+        <Checkbox
+          label={`${order.orderNumber} 선택`}
+          checked={selected}
+          onChange={(checked) => {
+            onSelect(order.id, checked);
+          }}
+        />
+      </td>
+      <td className="px-3 font-extrabold text-ink">
         <Link to={`/admin/orders/${order.id}`} className="underline-offset-2 hover:underline">
           {order.orderNumber}
         </Link>
@@ -184,6 +283,7 @@ const OrderRow = memo(function OrderRow({
         <StatusBadge status={status} />
       </td>
       <td className="px-6 text-right">
+        {reason !== null && <span className="mr-2 text-xs font-semibold text-danger">{reason}</span>}
         {next !== null && (
           <span className="inline-flex items-center gap-2">
             {failed && <span className="text-xs font-semibold text-danger">변경하지 못했어요</span>}

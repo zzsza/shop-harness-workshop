@@ -19,10 +19,12 @@ export const ROUTES = {
   orders: "/api/orders",
   order: "/api/orders/:orderId",
   orderCancel: "/api/orders/:orderId/cancel",
+  orderRefunds: "/api/orders/:orderId/refunds",
 
   adminOrders: "/api/admin/orders",
   adminOrder: "/api/admin/orders/:orderId",
   adminOrderStatus: "/api/admin/orders/:orderId/status",
+  adminOrderBulkStatus: "/api/admin/orders/bulk-status",
 
   adminInventory: "/api/admin/inventory",
   adminInventoryMovements: "/api/admin/inventory/:productId/movements",
