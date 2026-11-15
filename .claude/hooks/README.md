@@ -45,6 +45,7 @@
 | 기존 마이그레이션 읽기 | `cat`, `git diff -- 0001_init.sql`, `cp 0001_init.sql /tmp/backup.sql` |
 | 문서·실행 결과만 쓰고 끝내기(verify 요구 없음) | Write나 `cat > docs/tasks/x/interview.md`로 `.md` 쓰기, `git diff > docs/tasks/x/run/evidence/diff.patch` |
 | 리뷰가 쓰는 git·gh(코드 변경으로 치지 않음) | `git merge-base`, `gh pr view`·`diff`·`checks`·`comment`, `gh pr checkout`(이미 커밋된 PR 브랜치로 옮길 뿐 파일을 쓰지 않음) |
+| 이슈 세션 다루기(코드 변경으로 치지 않음) | `claude agents --json`, `claude --bg -w <이름> -n <이름> "..."`, `claude stop`·`rm`·`logs <id>`, `gh pr list`, 출력을 `jq`로 거르기. 같은 출력을 `python3 -c`·`node -e`로 거르면 코드 변경으로 침(스크립트는 파일을 쓸 수 있음) |
 | 브랜치 옮기기(코드 변경으로 치지 않음) | `git switch <브랜치>`, `git switch -`, `git switch -c <새 브랜치>`. `--discard-changes`·`-f`와 `git checkout`은 코드 변경으로 침 |
 
 `./gen.sh > notes.md`처럼 스스로 어디에 쓸지 모르는 프로그램은 출력을 문서로 돌려도 코드를 바꾼 것으로 봅니다.

@@ -452,6 +452,9 @@ const GH_NO_LOCAL_WRITES = {
   run: new Set(["view", "list", "watch"]),
   auth: new Set(["status"]),
 };
+// claude CLI에서 내 폴더의 파일을 쓰지 않는 하위 명령. 백그라운드 세션을 보고·멈추고·지우기만 한다.
+// `claude rm`이 지우는 세션 worktree는 .claude/worktrees/ 아래(git 제외)라 이 폴더의 코드가 아니다.
+const CLAUDE_NO_LOCAL_WRITES = new Set(["agents", "logs", "stop", "kill", "rm", "attach"]);
 const SWITCH_DISCARDS = new Set(["--discard-changes", "-f", "--force"]);
 const FIND_WRITES = new Set(["-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"]);
 const NPM_READ_ONLY = new Set(["run", "run-script", "test", "t", "ls", "view", "outdated"]);
@@ -495,6 +498,13 @@ export function isReadOnly(simple) {
   }
   if (name === "npm") return NPM_READ_ONLY.has(argv[1]);
   if (name === "gh") return GH_NO_LOCAL_WRITES[argv[1]]?.has(argv[2]) === true;
+  if (name === "claude") {
+    if (CLAUDE_NO_LOCAL_WRITES.has(argv[1])) return true;
+    // 자기 worktree(-w)에서 도는 백그라운드 세션을 띄우기만 한다. -w가 없으면 그 세션이 이 폴더를 고치므로 읽기 전용이 아니다.
+    const background = argv.includes("--bg") || argv.includes("--background");
+    const ownWorktree = argv.some((word) => word === "-w" || word === "--worktree" || word.startsWith("--worktree="));
+    return background && ownWorktree;
+  }
   return false;
 }
 

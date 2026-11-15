@@ -18,6 +18,8 @@
     "sync": "node scripts/sync.mjs",
     "verify": "node scripts/verify.mjs",
     "ci": "node scripts/ci.mjs",
+    "judge": "node scripts/judge.mjs",
+    "loop": "node scripts/loop.mjs",
     "dev": "node scripts/dev.mjs",
     "typecheck": "node scripts/verify.mjs --only typecheck",
     "lint": "node scripts/verify.mjs --only lint",

@@ -442,6 +442,31 @@ describe("stop-verify", () => {
     }
   });
 
+  it("백그라운드 세션을 보고·띄우고·지우는 claude 명령은 코드를 바꾼 것으로 치지 않는다", () => {
+    for (const command of [
+      "claude agents --json --all",
+      'claude --bg -w issue-3 -n issue-3 "/issue-to-pr docs/issues/3.md"',
+      "claude rm 49530251",
+      "claude stop 49530251",
+      "claude logs issue-3",
+      "gh pr list --state all --limit 100 --json number,state,url,body",
+      `claude agents --json --all | jq '.[] | select(.name == "issue-3") | .state'`,
+    ]) {
+      expect(stop(lines(use("a", "Bash", { command })), T2), command).toBeNull();
+    }
+  });
+
+  it("자기 worktree 없이 띄운 백그라운드 세션과 그 밖의 claude 명령은 코드 변경으로 친다", () => {
+    for (const command of [
+      'claude --bg -n issue-3 "/issue-to-pr docs/issues/3.md"',
+      'claude -p "고쳐줘"',
+      // 스크립트는 파일을 쓸 수 있다. 목록을 거르는 데 써도 코드를 돌린 것으로 친다(issue-dispatch는 출력을 그대로 읽는다).
+      `claude agents --json --all | python3 -c "import json,sys; print(len(json.load(sys.stdin)))"`,
+    ]) {
+      expect(stop(lines(use("a", "Bash", { command })), T2), command).toMatchObject({ decision: "block" });
+    }
+  });
+
   it("커밋된 브랜치로 옮기기만 하는 git switch는 코드를 바꾼 것으로 치지 않는다", () => {
     for (const command of ["git switch day2-a", "git switch -", "git switch -c feat/order-cancel", "git switch --detach abc123"]) {
       expect(stop(lines(use("a", "Bash", { command })), T2), command).toBeNull();

@@ -53,6 +53,9 @@
   "enabledMcpjsonServers": [
     "playwright"
   ],
+  "worktree": {
+    "baseRef": "head"
+  },
   "hooks": {
     "SessionStart": [
       {

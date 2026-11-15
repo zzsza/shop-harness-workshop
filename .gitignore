@@ -9,3 +9,9 @@ exports/
 docs/tasks/*/run/
 .playwright-mcp/
 .observer/
+
+# npm run judge가 숨은 테스트를 잠깐 두는 곳, npm run loop의 기록
+tests/judge-run-*/
+.loop/
+# claude --bg -w가 세션마다 만드는 worktree
+.claude/worktrees/
