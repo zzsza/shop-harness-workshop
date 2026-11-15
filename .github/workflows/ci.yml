@@ -24,6 +24,7 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
-      # day3 브랜치는 lint와 빌드만 돌린다.
-      - run: npm run lint
-      - run: npm run build
+      - run: npm run verify
+      # npm run setup은 claude 명령도 확인하므로 runner에 Claude Code를 깐다(로그인은 하지 않는다).
+      - run: npm install -g @anthropic-ai/claude-code
+      - run: npm run setup
