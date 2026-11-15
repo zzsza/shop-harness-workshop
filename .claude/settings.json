@@ -1,5 +1,8 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "env": {
+    "CLAUDE_CODE_SUBAGENT_MODEL": "haiku"
+  },
   "permissions": {
     "allow": [
       "Bash(npm run verify)",
@@ -8,7 +11,16 @@
       "Bash(npm run typecheck)",
       "Bash(git status)",
       "Bash(git diff *)",
-      "Bash(git log *)"
+      "Bash(git log *)",
+      "Bash(npm run *)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Edit(./.env)",
+      "Edit(./data/**)"
+    ],
+    "ask": [
+      "Bash(npm run db:reset)"
     ]
   },
   "hooks": {
@@ -29,6 +41,17 @@
           {
             "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR/tools/observer/hooks/instructions-loaded.mjs\""
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-migrations.mjs\""
           }
         ]
       }
