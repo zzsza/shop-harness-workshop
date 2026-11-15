@@ -83,6 +83,7 @@ Day1에 이미 clone했다면 Day2 시작 전에 `git fetch origin --tags --forc
 Day2부터는 내 fork에서 PR을 열고 PR마다 검사를 돌립니다.
 준비는 [docs/github.md](docs/github.md)를 따릅니다.
 GitHub를 쓸 수 없으면 같은 검사를 `npm run ci`로 내 컴퓨터에서 돌립니다.
+GitHub를 쓰든 못 쓰든 Day2 전에 레포 폴더에서 `npx -y @playwright/mcp@0.0.84 --version`을 한 번 돌려 화면 확인 도구를 미리 받아 둡니다(버전 숫자가 나오면 됩니다).
 
 ### 강의 뒤 정리
 

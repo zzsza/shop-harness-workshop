@@ -3,14 +3,34 @@
   "permissions": {
     "allow": [
       "Bash(npm run verify)",
-      "Bash(npm test)",
       "Bash(npm run lint)",
       "Bash(npm run typecheck)",
+      "Bash(npm run build)",
+      "Bash(npm run grade)",
+      "Bash(npm run grade -- *)",
+      "Bash(npm test)",
       "Bash(git status)",
       "Bash(git diff *)",
-      "Bash(git log *)"
+      "Bash(git log *)",
+      "mcp__playwright"
+    ],
+    "ask": [
+      "Bash(git push *)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.local)",
+      "Read(./.env.production)",
+      "Read(./**/.env)",
+      "Edit(./.env)",
+      "Edit(./.env.local)",
+      "Edit(./.env.production)",
+      "Edit(./**/.env)"
     ]
   },
+  "enabledMcpjsonServers": [
+    "playwright"
+  ],
   "hooks": {
     "SessionStart": [
       {
@@ -29,6 +49,51 @@
           {
             "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR/tools/observer/hooks/instructions-loaded.mjs\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop-verify.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-bash.mjs\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Write|Edit|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-files.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/lint-saved-file.mjs\"",
+            "timeout": 30
           }
         ]
       }

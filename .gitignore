@@ -6,4 +6,6 @@ data/*.sqlite*
 coverage/
 *.tsbuildinfo
 exports/
+docs/tasks/*/run/
+.playwright-mcp/
 .observer/
