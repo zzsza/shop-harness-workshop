@@ -1,6 +1,7 @@
 # 8. DB 변경은 새 번호 마이그레이션
 
 DB 스키마를 바꾸려면 `packages/db/migrations/`에 다음 번호 파일(예: `0002_add_order_memo.sql`)을 새로 만듭니다.
+새 파일은 `npm run db:new-migration -- <이름> <SQL 파일>`로 만듭니다. migrations 밖에 써 둔 SQL 초안을 다음 번호로 옮겨 주고, 이미 있는 번호는 덮어쓰지 않습니다.
 이미 있는 마이그레이션 파일은 고치지 않습니다.
 
 ## 이유
