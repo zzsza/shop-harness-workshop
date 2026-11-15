@@ -14,6 +14,7 @@
 | `npm run lint` | lint만 |
 | `npm run build` | 웹 빌드만 |
 | `npm run db:reset` | DB를 지우고 시드로 다시 채움 |
+| `npm run db:new-migration -- <이름> <SQL 파일>` | SQL 초안을 다음 번호 마이그레이션 파일로 옮김 |
 | `npm run orders:simulate` | 몇 초마다 새 주문을 만듦(Ctrl+C로 멈춤) |
 | `npm run mcp:db` | 읽기 전용 DB MCP 서버(stdio) |
 | `npm run viewer` | 세션 뷰어 |

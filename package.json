@@ -24,6 +24,7 @@
     "test": "vitest run",
     "build": "node scripts/verify.mjs --only build",
     "db:reset": "node apps/api/scripts/db-reset.ts",
+    "db:new-migration": "node scripts/new-migration.mjs",
     "orders:simulate": "node apps/api/scripts/orders-simulate.ts",
     "mcp:db": "node tools/mcp-db/src/server.ts",
     "viewer": "node viewer.mjs",

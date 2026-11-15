@@ -8,3 +8,4 @@ coverage/
 exports/
 reports/
 .observer/
+tmp/

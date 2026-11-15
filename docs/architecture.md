@@ -48,6 +48,7 @@ API 모듈은 `catalog`, `events`, `inventory`, `orders`, `auth`, `shared`이고
 
 SQLite 파일은 `data/` 아래에 있고 git에 올리지 않습니다.
 스키마는 `packages/db/migrations/NNNN_이름.sql`이 정하고, 서버가 뜰 때 아직 적용하지 않은 번호만 적용합니다.
+새 번호 파일은 `npm run db:new-migration`으로 만듭니다.
 서버는 loopback(127.0.0.1)에만 바인딩합니다.
 
 ## 환경 변수
