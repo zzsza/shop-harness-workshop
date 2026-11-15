@@ -22,20 +22,42 @@ afterEach(() => {
 });
 
 describe("migrate", () => {
-  it("0001_init으로 앱 테이블을 모두 만든다", () => {
+  it("마이그레이션을 모두 적용하면 앱 테이블이 모두 생긴다", () => {
     const db = createTestDatabase();
     const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all() as { name: string }[]).map(
       (row) => row.name,
     );
     expect(tables).toEqual([
+      "announcements",
+      "batch_job_settings",
+      "batch_run_logs",
+      "batch_runs",
       "categories",
+      "coupon_redemptions",
+      "coupon_wallet",
+      "coupons",
       "inventory",
       "inventory_movements",
+      "notification_queue",
+      "notification_settings",
+      "notifications",
+      "order_address_changes",
+      "order_cancellations",
       "order_items",
+      "order_payments",
       "orders",
+      "point_balances",
+      "point_campaigns",
+      "point_ledger",
       "products",
+      "return_request_items",
+      "return_requests",
+      "return_shipments",
       "schema_migrations",
       "sessions",
+      "settlement_adjustments",
+      "settlement_daily",
+      "shipments",
       "users",
     ]);
   });

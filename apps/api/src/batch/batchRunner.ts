@@ -1,0 +1,221 @@
+// 배치 실행과 기록
+import {
+  BATCH_JOBS,
+  addDays,
+  badRequest,
+  batchJobName,
+  conflict,
+  fmtDurationMs,
+  fmtMdHm,
+  kstClock,
+  log,
+  logError,
+  notFoundError,
+  now,
+  nowIso,
+  startOfDay,
+  ymd,
+} from "../legacy/legacyUtils.ts";
+import * as dao from "./infra/batchDao.ts";
+import { JOB_DEPENDS_ON, JOB_FUNCTIONS, runKeyFor } from "./application/jobs.ts";
+
+const RUNNING: any = {};
+
+function errorText(e: any): string {
+  const message = e && e.message ? String(e.message) : String(e);
+  if (/locked|busy/i.test(message)) return "데이터베이스가 잠겨 있었어요";
+  if (/no such table/i.test(message)) return "표가 없어요. 마이그레이션을 확인해 주세요";
+  return "처리 중 오류가 났어요";
+}
+
+/**
+ * 배치 하나를 실행하고 기록을 남긴다.
+ * trigger: schedule(시각이 되어 자동) / manual(관리자가 지금 실행)
+ */
+export function runJob(job: string, trigger: string, runKeyInput?: string): any {
+  const fn = JOB_FUNCTIONS[job];
+  if (!fn) throw badRequest("없는 배치예요.");
+  if (RUNNING[job] || dao.isRunning(job)) throw conflict("BATCH_RUNNING", batchJobName(job) + " 배치가 이미 실행 중이에요.");
+  const runKey = runKeyInput || runKeyFor(job);
+  const startedIso = nowIso();
+  const dependsOn = JOB_DEPENDS_ON[job];
+  if (dependsOn && trigger === "schedule") {
+    const dependRun = dao.lastRun(dependsOn);
+    if (dependRun && dependRun.state === "failed" && dependRun.started_at >= startOfDay(now()).toISOString()) {
+      const id = dao.insertSkipped(job, runKey, trigger, startedIso, "앞 배치가 실패해 실행하지 않았어요");
+      log("batch_skipped", { job: job, runId: id });
+      return { id: id, job: job, state: "skipped" };
+    }
+  }
+  const id = dao.startRun(job, runKey, trigger, startedIso);
+  RUNNING[job] = true;
+  const started = Date.now();
+  try {
+    const result = fn(id, runKey);
+    const duration = Date.now() - started;
+    if (result && result.quiet && trigger === "schedule") {
+      dao.deleteRun(id);
+      return { id: null, job: job, state: "success", quiet: true };
+    }
+    const prev = dao.lastRun(job, runKey);
+    let note = result.note;
+    if (!note && prev && prev.id !== id) {
+      const before = dao.listRuns(job, 5).find((r: any) => r.id !== id && r.run_key === runKey && r.state === "failed");
+      if (before) note = fmtMdHm(before.started_at).slice(6) + " 실패분을 다시 실행했어요";
+    }
+    dao.finishRun(id, "success", result.processed, result.total, note, nowIso(), duration);
+    if (result.logs && result.logs.length > 0) dao.addLogs(id, "info", result.logs, nowIso());
+    log("batch_finished", { job: job, runId: id, processed: result.processed, ms: duration });
+    return { id: id, job: job, state: "success", processed: result.processed, total: result.total };
+  } catch (e: any) {
+    const duration = Date.now() - started;
+    dao.finishRun(id, "failed", 0, null, errorText(e), nowIso(), duration);
+    dao.addLogs(id, "error", [errorText(e)], nowIso());
+    logError("batch_failed", e, { job: job, runId: id });
+    return { id: id, job: job, state: "failed", note: errorText(e) };
+  } finally {
+    RUNNING[job] = false;
+    dao.trimOld(job, 400);
+  }
+}
+
+/** 관리자 화면: 실행 기록 */
+export function history(job: string | null): any {
+  const rows = dao.listRuns(job, 120);
+  return {
+    schedule: Object.keys(BATCH_JOBS)
+      .filter((k) => BATCH_JOBS[k].time)
+      .map((k) => ({ job: k, name: BATCH_JOBS[k].name, time: kstClock(BATCH_JOBS[k].time) })),
+    jobs: Object.keys(BATCH_JOBS).map((k) => ({ job: k, name: BATCH_JOBS[k].name })),
+    jobStates: jobStates(),
+    runs: rows.map((r: any) => ({
+      id: r.id,
+      job: r.job_name,
+      jobName: batchJobName(r.job_name),
+      runKey: r.run_key,
+      startedAt: r.started_at,
+      startedAtText: fmtMdHm(r.started_at),
+      durationMs: r.duration_ms,
+      durationText: r.duration_ms == null ? null : fmtDurationMs(r.duration_ms),
+      processed: r.processed,
+      total: r.total,
+      processedText:
+        r.processed == null ? null : r.state === "failed" && r.total != null ? r.total + "건 중 " + r.processed + "건" : r.processed + "건",
+      state: r.state,
+      note: r.note,
+      trigger: r.trigger,
+    })),
+  };
+}
+
+/** 오늘 실행해야 하는데 아직 안 한 배치를 실행한다(스케줄러가 1분마다 부른다) */
+export function runDue(): any[] {
+  const results: any[] = [];
+  const current = now();
+  const settings = dao.jobSettings();
+  for (const job of Object.keys(BATCH_JOBS)) {
+    const time = BATCH_JOBS[job].time;
+    if (settings[job] && settings[job].paused_at) continue;
+    try {
+      if (!time) {
+        results.push(runJob(job, "schedule"));
+        continue;
+      }
+      const parts = String(time).split(":");
+      const dueAt = new Date(startOfDay(current).getTime() + Number(parts[0]) * 3600000 + Number(parts[1]) * 60000);
+      if (current.getTime() < dueAt.getTime()) continue;
+      const key = runKeyFor(job);
+      if (dao.hasSuccess(job, key)) continue;
+      const last = dao.lastRun(job, key);
+      if (last && (last.state === "failed" || last.state === "skipped")) continue;
+      results.push(runJob(job, "schedule", key));
+    } catch (e) {
+      logError("batch_due_failed", e, { job: job });
+    }
+  }
+  return results;
+}
+
+/** 서버가 죽어 끝나지 않은 기록을 실패로 바꾼다 */
+export function recoverStale(): number {
+  return dao.clearStaleRunning(addDays(now(), -1 / 24).toISOString());
+}
+
+export function yesterdayKey(): string {
+  return ymd(addDays(startOfDay(now()), -1));
+}
+
+/** 실행 한 건의 로그 */
+export function runLogs(idInput: any): any {
+  const id = Number(idInput);
+  const r = dao.findRun(id);
+  if (!r) throw notFoundError("실행 기록을 찾을 수 없습니다.");
+  return {
+    id: r.id,
+    job: r.job_name,
+    jobName: batchJobName(r.job_name),
+    state: r.state,
+    startedAtText: fmtMdHm(r.started_at),
+    logs: dao.logsOf(id).map((l: any) => ({ id: l.id, level: l.level, message: l.message, atText: fmtMdHm(l.created_at) })),
+  };
+}
+
+/** 작업별 최근 30일 성공률 */
+export function healthSummary(): any {
+  const since = addDays(now(), -30).toISOString();
+  const states = jobStates();
+  const byJob: any = {};
+  for (const r of dao.stateCounts(since)) {
+    if (!byJob[r.job_name]) byJob[r.job_name] = { success: 0, failed: 0, skipped: 0, running: 0 };
+    byJob[r.job_name][r.state] = Number(r.n);
+  }
+  return {
+    jobs: Object.keys(BATCH_JOBS).map((k) => {
+      const c = byJob[k] || { success: 0, failed: 0, skipped: 0, running: 0 };
+      const last = dao.lastRun(k);
+      return {
+        job: k,
+        name: BATCH_JOBS[k].name,
+        time: BATCH_JOBS[k].time ? kstClock(BATCH_JOBS[k].time) : null,
+        success: c.success,
+        failed: c.failed,
+        skipped: c.skipped,
+        lastState: last ? last.state : null,
+        paused: !!(states[k] && states[k].paused),
+        lastStartedAtText: last ? fmtMdHm(last.started_at) : null,
+      };
+    }),
+  };
+}
+
+/** 자동 실행 멈추기·다시 켜기 (지금 실행 버튼은 멈춰도 쓸 수 있다) */
+export function setJobPaused(admin: any, job: string, paused: boolean, memoInput: any): any {
+  if (!BATCH_JOBS[job]) throw badRequest("없는 배치예요.");
+  const settings = dao.jobSettings();
+  const now0 = nowIso();
+  const isPaused = !!(settings[job] && settings[job].paused_at);
+  if (paused && isPaused) throw conflict("BATCH_ALREADY_PAUSED", batchJobName(job) + " 자동 실행은 이미 멈춰 있어요.");
+  if (!paused && !isPaused) throw conflict("BATCH_NOT_PAUSED", batchJobName(job) + " 자동 실행은 멈춰 있지 않아요.");
+  const memoText = memoInput == null ? null : String(memoInput).trim().slice(0, 100) || null;
+  dao.setPaused(job, paused ? now0 : null, admin.id, paused ? memoText : null, now0);
+  log(paused ? "batch_paused" : "batch_resumed", { job: job });
+  return jobStates()[job];
+}
+
+export function jobStates(): any {
+  const settings = dao.jobSettings();
+  const out: any = {};
+  for (const k of Object.keys(BATCH_JOBS)) {
+    const s = settings[k];
+    out[k] = {
+      job: k,
+      name: BATCH_JOBS[k].name,
+      time: BATCH_JOBS[k].time ? kstClock(BATCH_JOBS[k].time) : null,
+      paused: !!(s && s.paused_at),
+      pausedAtText: s && s.paused_at ? fmtMdHm(s.paused_at) : null,
+      pausedBy: s && s.paused_at ? s.paused_by_name : null,
+      memo: s ? s.memo : null,
+    };
+  }
+  return out;
+}

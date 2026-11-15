@@ -1,4 +1,4 @@
-import { type OrderDetail, type OrderSummary, OrderParamsSchema, PAYMENT_METHOD_LABELS } from "@grabmarket/contracts";
+import { type OrderSummary, OrderParamsSchema, PAYMENT_METHOD_LABELS } from "@grabmarket/contracts";
 import { Form, Link, type LoaderFunctionArgs, useLoaderData } from "react-router";
 import { streamed } from "../lib/streamed.ts";
 import { callApi } from "../api/client.ts";
@@ -6,13 +6,14 @@ import { LinkButton } from "../components/button.tsx";
 import { Icon } from "../components/icon.tsx";
 import { Loaded } from "../components/loaded.tsx";
 import { OrderLines } from "../components/order-lines.tsx";
-import { OrderSteps } from "../components/order-steps.tsx";
 import { Page } from "../components/page.tsx";
 import { Bone, EmptyState } from "../components/states.tsx";
 import { StatusBadge } from "../components/status-badge.tsx";
 import { krw } from "../lib/format.ts";
-import { elapsedOrderLabel, formatShortTime } from "../lib/format.ts";
+import { formatShortTime } from "../lib/format.ts";
 import { NotFoundError } from "../lib/not-found.ts";
+import { signedKrw, wonText } from "../legacy/money.ts";
+import { type PaidInfo, myPayments } from "../legacy/payments.ts";
 
 export function summarize(order: Pick<OrderSummary, "firstItemName" | "itemCount">): string {
   return order.itemCount > 1 ? `${order.firstItemName} 외 ${order.itemCount - 1}건` : order.firstItemName;
@@ -21,7 +22,7 @@ export function summarize(order: Pick<OrderSummary, "firstItemName" | "itemCount
 // ---- 내 주문 목록 ----
 
 export function myOrdersLoader() {
-  return { result: streamed(callApi("listMyOrders")) };
+  return { result: streamed(Promise.all([callApi("listMyOrders"), myPayments()]).then(([list, paid]) => ({ orders: list.orders, paid }))) };
 }
 
 export function MyOrdersPage() {
@@ -42,7 +43,7 @@ export function MyOrdersPage() {
           </>
         }
       >
-        {({ orders }) => (
+        {({ orders, paid }) => (
           <>
             <Heading count={orders.length} />
             {orders.length === 0 ? (
@@ -54,7 +55,7 @@ export function MyOrdersPage() {
                 </EmptyState>
               </div>
             ) : (
-              <OrderList orders={orders} />
+              <OrderList orders={orders} paid={paid} />
             )}
           </>
         )}
@@ -93,7 +94,7 @@ function Heading({ count }: { count?: number }) {
 
 const listGrid = "md:grid md:grid-cols-[8rem_9rem_minmax(0,1fr)_8rem_6rem_2rem] md:items-center md:gap-x-4";
 
-function OrderList({ orders }: { orders: OrderSummary[] }) {
+function OrderList({ orders, paid }: { orders: OrderSummary[]; paid: Map<number, PaidInfo> }) {
   return (
     <div className="rounded-md border border-line bg-ground">
       <div className={`${listGrid} hidden h-10 border-b border-line px-6 text-xs-plus text-ink-3 md:grid`}>
@@ -111,7 +112,7 @@ function OrderList({ orders }: { orders: OrderSummary[] }) {
               <span className="text-sm font-extrabold text-ink md:text-sm">{order.orderNumber}</span>
               <span className="order-last w-full text-xs-plus text-ink-3 md:order-none md:w-auto md:text-sm">{formatShortTime(order.createdAt)}</span>
               <span className="order-last w-full truncate text-sm text-ink md:order-none md:w-auto">{summarize(order)}</span>
-              <span className="text-sm font-extrabold text-ink md:text-right">{krw(order.total)}</span>
+              <span className="text-sm font-extrabold text-ink md:text-right">{wonText(paid.get(order.id)?.paidAmount ?? order.total)}</span>
               <span className="max-md:order-2">
                 <StatusBadge status={order.status} />
               </span>
@@ -129,7 +130,10 @@ function OrderList({ orders }: { orders: OrderSummary[] }) {
 export function myOrderLoader({ params }: LoaderFunctionArgs) {
   const parsed = OrderParamsSchema.safeParse(params);
   if (!parsed.success) throw new NotFoundError("찾을 수 없는 주문입니다");
-  return { result: streamed(callApi("getMyOrder", { params: { orderId: parsed.data.orderId } })) };
+  const orderId = parsed.data.orderId;
+  return {
+    result: streamed(Promise.all([callApi("getMyOrder", { params: { orderId } }), myPayments()]).then(([found, paid]) => ({ order: found.order, payment: paid.get(orderId) ?? null }))),
+  };
 }
 
 const orderNotFound = (
@@ -148,79 +152,12 @@ const detailSkeleton = (
   </div>
 );
 
-function MethodRows({ order }: { order: OrderDetail }) {
-  return (
-    <dl className="flex flex-col gap-3 text-sm">
-      <div className="flex justify-between gap-4">
-        <dt className="shrink-0 text-ink-3">결제 수단</dt>
-        <dd className="text-right font-semibold text-ink">{PAYMENT_METHOD_LABELS[order.paymentMethod]}</dd>
-      </div>
-      <div className="flex justify-between gap-4">
-        <dt className="shrink-0 text-ink-3">배송지</dt>
-        <dd className="text-right font-semibold text-ink">{order.shipping.address}</dd>
-      </div>
-    </dl>
-  );
-}
-
-export function MyOrderPage() {
-  const { result } = useLoaderData<typeof myOrderLoader>();
-  return (
-    <Page>
-      <Loaded resolve={result} failure="주문을 불러오지 못했어요" skeleton={detailSkeleton} notFound={orderNotFound}>
-        {({ order }) => (
-          <>
-            <Link to="/orders" className="inline-flex items-center gap-1 text-xs-plus font-semibold text-ink-2">
-              <Icon name="chevronLeft" className="size-4" />내 주문
-            </Link>
-            <h1 className="mt-3 flex flex-wrap items-center gap-3 text-xl leading-8 font-extrabold text-ink md:text-2xl">
-              주문 {order.orderNumber}
-              <StatusBadge status={order.status} />
-              <span className="text-sm leading-5 font-medium text-ink-3">{formatShortTime(order.createdAt)} · {elapsedOrderLabel(order.elapsedDays)}</span>
-            </h1>
-            <div className="mt-4 rounded-md border border-line bg-ground px-4 py-5 md:px-6 md:py-6">
-              <div className="mx-auto max-w-190">
-                <OrderSteps status={order.status} />
-              </div>
-            </div>
-            <div className="mt-3 flex flex-col gap-3 lg:grid lg:grid-cols-[minmax(0,1fr)_22.5rem] lg:items-start lg:gap-3">
-              <section aria-labelledby="order-items" className="rounded-md border border-line bg-ground">
-                <h2 id="order-items" className="flex h-12 items-center border-b border-line px-4 text-base font-extrabold text-ink md:px-6">
-                  주문 상품
-                </h2>
-                <OrderLines items={order.items} />
-              </section>
-              <aside aria-label="결제 정보" className="rounded-md border border-line bg-ground p-6">
-                <dl className="flex flex-col gap-3 text-sm">
-                  <div className="flex justify-between">
-                    <dt className="text-ink-3">상품 합계</dt>
-                    <dd className="font-semibold text-ink">{krw(order.subtotal)}</dd>
-                  </div>
-                  <div className="flex justify-between">
-                    <dt className="text-ink-3">배송비</dt>
-                    <dd className="font-semibold text-ink">{krw(order.shippingFee)}</dd>
-                  </div>
-                  <div className="mb-3 flex items-center justify-between border-t border-line pt-4">
-                    <dt className="font-bold text-ink">결제 금액</dt>
-                    <dd className="text-2xl leading-9 font-extrabold text-ink">{krw(order.total)}</dd>
-                  </div>
-                </dl>
-                <MethodRows order={order} />
-              </aside>
-            </div>
-          </>
-        )}
-      </Loaded>
-    </Page>
-  );
-}
-
 export function OrderCompletePage() {
   const { result } = useLoaderData<typeof myOrderLoader>();
   return (
     <Page>
       <Loaded resolve={result} failure="주문을 불러오지 못했어요" skeleton={detailSkeleton} notFound={orderNotFound}>
-        {({ order }) => (
+        {({ order, payment }) => (
           <div className="mx-auto max-w-180">
             <div className="flex flex-col items-center text-center">
               <span className="flex size-14 items-center justify-center rounded-pill bg-accent text-ink">
@@ -250,9 +187,15 @@ export function OrderCompletePage() {
                     {krw(order.subtotal)} + {krw(order.shippingFee)}
                   </dd>
                 </div>
+                {payment !== null && payment.couponDiscount + payment.pointUsed !== 0 && (
+                  <div className="flex h-11 items-center justify-between border-b border-line px-4 md:px-6">
+                    <dt className="text-ink-3">쿠폰·포인트 할인</dt>
+                    <dd className="font-semibold text-ink">{signedKrw(-(payment.couponDiscount + payment.pointUsed))}</dd>
+                  </div>
+                )}
                 <div className="flex h-16 items-center justify-between px-4 md:px-6">
                   <dt className="font-bold text-ink">결제 금액</dt>
-                  <dd className="text-xl font-extrabold text-ink">{krw(order.total)}</dd>
+                  <dd className="text-xl font-extrabold text-ink">{wonText(payment?.paidAmount ?? order.total)}</dd>
                 </div>
               </dl>
             </div>

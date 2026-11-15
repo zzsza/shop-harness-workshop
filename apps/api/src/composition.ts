@@ -30,6 +30,8 @@ import { OrderController } from "./orders/web/order-controller.ts";
 import { ShippingPolicyController } from "./orders/web/shipping-policy-controller.ts";
 import { SqliteUnitOfWork } from "./shared/infra/sqlite-unit-of-work.ts";
 import { HealthController } from "./shared/web/health-controller.ts";
+import { bootLegacy, LegacyRoutes } from "./legacy/legacyBootstrap.ts";
+import { legacyCancelListener } from "./legacy/orderHooks.ts";
 
 export interface AppDependencies {
   db: Database;
@@ -50,13 +52,15 @@ export function composeServices({ db, clock }: AppDependencies) {
   const events = new EventService(new InCodeEventRepository(), catalog);
   const inventory = new InventoryService(new SqliteInventoryRepository(db), uow, clock);
   const orderRepository = new SqliteOrderRepository(db);
-  const orders = new OrderService(orderRepository, catalog, inventory, uow, clock);
+  const orders = new OrderService(orderRepository, catalog, inventory, uow, clock, [legacyCancelListener]);
   const adminOrders = new AdminOrderService(orderRepository, uow, clock);
   return { uow, auth, catalog, events, inventory, orders, adminOrders, orderRepository };
 }
 
 export function composeApp(dependencies: AppDependencies): Express {
-  const { auth, catalog, events, inventory, orders, adminOrders, orderRepository } = composeServices(dependencies);
+  const services = composeServices(dependencies);
+  const { auth, catalog, events, inventory, orders, adminOrders, orderRepository } = services;
+  bootLegacy(dependencies.db, services);
   return createApp(createSessionMiddleware(auth), [
     new HealthController(),
     new AuthController(auth),
@@ -67,5 +71,6 @@ export function composeApp(dependencies: AppDependencies): Express {
     new MyOrderController(orderRepository),
     new AdminOrderController(adminOrders),
     new InventoryController(inventory),
+    new LegacyRoutes(),
   ]);
 }

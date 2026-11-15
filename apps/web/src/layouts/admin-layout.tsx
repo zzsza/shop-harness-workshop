@@ -23,21 +23,28 @@ export function AdminGuard() {
 }
 
 const tabClass = ({ isActive }: { isActive: boolean }) =>
-  `relative flex h-full items-center px-1 text-base ${isActive ? "font-extrabold text-ink" : "font-semibold text-ink-2"}`;
+  `relative flex h-full shrink-0 items-center px-1 text-base ${isActive ? "font-extrabold text-ink" : "font-semibold text-ink-2"}`;
 
 function AdminLayout({ name }: { name: string }) {
   return (
     <div className="min-h-dvh bg-canvas">
       <header className="border-b border-line bg-ground">
-        <div className="mx-auto flex h-16 max-w-360 items-center gap-8 px-4 md:px-8">
-          <span className="flex items-center gap-2">
+        <div className="mx-auto flex max-w-360 flex-wrap items-center gap-x-8 px-4 md:h-16 md:flex-nowrap md:px-8">
+          <span className="flex h-14 shrink-0 items-center gap-2 md:h-auto">
             <span className="text-3xl leading-9 font-black tracking-tighter text-ink">그랩마켓</span>
             <span className="rounded-sm bg-ink px-2 py-0.5 text-xs font-bold text-on-dark">관리자</span>
           </span>
-          <nav aria-label="관리자 메뉴" className="flex h-full gap-6">
+          <nav aria-label="관리자 메뉴" className="order-last flex h-11 w-full min-w-0 gap-5 overflow-x-auto md:order-none md:h-full md:w-auto">
             {[
               { to: "/admin/orders", label: "주문" },
               { to: "/admin/inventory", label: "재고" },
+              { to: "/admin/settlements", label: "정산" },
+              { to: "/admin/coupons", label: "쿠폰" },
+              { to: "/admin/points", label: "포인트" },
+              { to: "/admin/shipments", label: "배송" },
+              { to: "/admin/returns", label: "반품" },
+              { to: "/admin/notifications", label: "알림" },
+              { to: "/admin/batch", label: "배치" },
             ].map((tab) => (
               <NavLink key={tab.to} to={tab.to} className={tabClass}>
                 {({ isActive }) => (
@@ -49,8 +56,8 @@ function AdminLayout({ name }: { name: string }) {
               </NavLink>
             ))}
           </nav>
-          <div className="ml-auto flex items-center gap-4 text-sm font-semibold text-ink-2">
-            <span>{name}</span>
+          <div className="ml-auto flex shrink-0 items-center gap-4 text-sm font-semibold text-ink-2">
+            <span className="hidden md:inline">{name}</span>
             <Form method="post" action="/logout">
               <button type="submit" className="text-ink-2">
                 로그아웃
