@@ -119,7 +119,7 @@ export function planMerge(repo: string, branch: string): MergePlan {
     const names = lines(git(repo, ["for-each-ref", "--format=%(refname:short)", "refs/heads"])).filter((name) => name !== current);
     throw refuse(`${branch} 브랜치가 없습니다.`, [`합칠 수 있는 브랜치: ${names.length > 0 ? names.join(", ") : "없음"}`]);
   }
-  if (branch === current) throw refuse(`${branch}는 지금 브랜치입니다. 합칠 다른 브랜치를 적으세요.`, [USAGE]);
+  if (branch === current) throw refuse(`${branch} 브랜치는 지금 있는 브랜치입니다. 합칠 다른 브랜치를 적으세요.`, [USAGE]);
   const changed = lines(run(repo, ["-c", "core.quotepath=off", "status", "--porcelain", "--untracked-files=all"]).stdout).map((line) => line.slice(3));
   if (changed.length > 0) {
     const shown = changed.slice(0, 5).join(", ") + (changed.length > 5 ? ` 외 ${changed.length - 5}개` : "");
@@ -127,7 +127,7 @@ export function planMerge(repo: string, branch: string): MergePlan {
   }
   const head = git(repo, ["rev-parse", "HEAD"]);
   if (run(repo, ["merge-base", "--is-ancestor", commit, head]).status === 0) {
-    throw refuse(`${branch}(${short(commit)})는 이미 ${current}에 합쳐져 있습니다.`, [`합칠 새 커밋이 없습니다. ${branch}에 고친 것을 커밋했는지 확인하세요.`]);
+    throw refuse(`${branch} 브랜치(${short(commit)})는 이미 ${current}에 합쳐져 있습니다.`, [`합칠 새 커밋이 없습니다. ${branch}에 고친 것을 커밋했는지 확인하세요.`]);
   }
   const ahead = Number(git(repo, ["rev-list", "--count", `${head}..${commit}`]));
   return { current, branch, commit, head, ahead };
@@ -135,15 +135,15 @@ export function planMerge(repo: string, branch: string): MergePlan {
 
 function checkFailure(plan: MergePlan, result: CheckResult): StepFailure {
   const { branch, current } = plan;
-  const again = `다시 할 일: git switch ${branch}로 옮겨 고치고 커밋한 뒤, git switch ${current}로 돌아와 npm run merge ${branch}를 다시 실행하세요.`;
+  const again = `다시 할 일: ${branch} 브랜치로 옮겨(git switch ${branch}) 고치고 커밋한 뒤, ${current} 브랜치로 돌아와(git switch ${current}) npm run merge ${branch}를 다시 실행하세요.`;
   if (result.code === 1) {
     if (result.failed === null) throw new Error("npm run ci가 실패했는데 실패한 단계를 알려 주지 않았습니다.");
     const step = stepHelp(result.failed, current);
     const tryAlone = step.command === null ? [] : [`그 단계만 먼저 돌려 보기: ${branch}에서 ${step.command}`];
-    return refuse(`"${step.name}" 단계에서 실패해서 ${branch}를 ${current}에 합치지 않았습니다. 실패 내용은 위 검사 출력에 있습니다.`, [again, ...tryAlone]);
+    return refuse(`"${step.name}" 단계에서 실패해서 ${branch} 브랜치를 ${current}에 합치지 않았습니다. 실패 내용은 위 검사 출력에 있습니다.`, [again, ...tryAlone]);
   }
-  if (result.code === 2) return refuse(`검사를 돌릴 수 없어서 ${branch}를 합치지 않았습니다. 이유는 위 [ci] 줄에 있습니다.`);
-  return refuse(`검사가 중간에 멈춰서(종료 코드 ${result.code}) ${branch}를 합치지 않았습니다.`, [`다시 실행하세요: npm run merge ${branch}`]);
+  if (result.code === 2) return refuse(`검사를 돌릴 수 없어서 ${branch} 브랜치를 합치지 않았습니다. 이유는 위 [ci] 줄에 있습니다.`);
+  return refuse(`검사가 중간에 멈춰서(종료 코드 ${result.code}) ${branch} 브랜치를 합치지 않았습니다.`, [`다시 실행하세요: npm run merge ${branch}`]);
 }
 
 /** git merge --no-ff. 충돌하면 git merge --abort로 되돌리고 충돌한 파일과 할 일을 담아 멈춘다. */
@@ -157,8 +157,8 @@ function mergeBranch(repo: string, plan: MergePlan): string {
   const conflicted = lines(git(repo, ["-c", "core.quotepath=off", "diff", "--name-only", "--diff-filter=U"]));
   if (run(repo, ["rev-parse", "--verify", "--quiet", "MERGE_HEAD"]).status === 0) git(repo, ["merge", "--abort"]);
   if (conflicted.length === 0) throw refuse(`git merge가 실패했습니다. ${(merged.stderr || merged.stdout).trim()}`);
-  throw refuse(`${branch}와 ${current}가 같은 곳을 다르게 고쳐 충돌했습니다(${conflicted.join(", ")}). git merge --abort로 합치기 전으로 되돌렸습니다.`, [
-    `다시 할 일: git switch ${branch}에서 git merge ${current}로 ${current}의 변경을 먼저 받아 충돌을 풀고 커밋한 뒤, git switch ${current}로 돌아와 npm run merge ${branch}를 다시 실행하세요.`,
+  throw refuse(`${branch} 브랜치와 ${current} 브랜치가 같은 곳을 다르게 고쳐 충돌했습니다(${conflicted.join(", ")}). git merge --abort로 합치기 전으로 되돌렸습니다.`, [
+    `다시 할 일: ${branch} 브랜치에서 git merge ${current}를 실행해 ${current}의 변경을 먼저 받고, 충돌을 풀어 커밋한 뒤, ${current} 브랜치로 돌아와(git switch ${current}) npm run merge ${branch}를 다시 실행하세요.`,
   ]);
 }
 
@@ -188,7 +188,7 @@ export async function runMerge(argv: readonly string[], options: MergeOptions = 
       run: () => {
         const plan = planMerge(repo, branch);
         found.plan = plan;
-        return `${plan.current}에 ${branch}(${short(plan.commit)}, 새 커밋 ${plan.ahead}개)를 합칩니다. 커밋 안 한 변경 없음`;
+        return `${plan.current}에 ${branch} 브랜치(${short(plan.commit)}, 새 커밋 ${plan.ahead}개)를 합칩니다. 커밋 안 한 변경 없음`;
       },
     },
     {
@@ -212,6 +212,6 @@ export async function runMerge(argv: readonly string[], options: MergeOptions = 
   ];
   if (!(await runSteps(SCRIPT, steps, 2, TOTAL_STEPS))) return 1;
   const plan = need();
-  console.log(`\n${branch}를 ${plan.current}에 합쳤습니다. 검사를 통과한 커밋 ${short(plan.commit)}이 들어갔습니다.`);
+  console.log(`\n${branch} 브랜치를 ${plan.current}에 합쳤습니다. 들어간 커밋 ${short(plan.commit)}는 검사를 통과했습니다.`);
   return 0;
 }

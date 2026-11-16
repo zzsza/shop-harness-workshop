@@ -65,7 +65,7 @@ describe("npm run merge", () => {
     expect(check.calls).toEqual([[repo, feature, "day2-a"]]);
     expect(git(repo, "rev-parse", "--abbrev-ref", "HEAD")).toBe("day2-a");
     expect(git(repo, "rev-parse", "HEAD^1", "HEAD^2")).toBe(`${before}\n${feature}`);
-    expect(printed()).toContain("feat/x를 day2-a에 합쳤습니다.");
+    expect(printed()).toContain("feat/x 브랜치를 day2-a에 합쳤습니다.");
   });
 
   it("검사가 실패하면 합치지 않고 실패한 단계와 다시 할 일을 보인다", async () => {
@@ -76,8 +76,8 @@ describe("npm run merge", () => {
     expect(await runMerge(["feat/x"], { repo, runCheck: fakeCheck({ code: 1, failed: "test" }).runCheck })).toBe(1);
 
     expect(git(repo, "rev-parse", "HEAD")).toBe(before);
-    expect(printed()).toContain('"테스트" 단계에서 실패해서 feat/x를 day2-a에 합치지 않았습니다.');
-    expect(printed()).toContain("git switch feat/x로 옮겨 고치고 커밋한 뒤");
+    expect(printed()).toContain('"테스트" 단계에서 실패해서 feat/x 브랜치를 day2-a에 합치지 않았습니다.');
+    expect(printed()).toContain("feat/x 브랜치로 옮겨(git switch feat/x) 고치고 커밋한 뒤");
     expect(printed()).toContain("npm test");
   });
 
