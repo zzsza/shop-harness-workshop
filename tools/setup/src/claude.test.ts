@@ -63,6 +63,19 @@ describe("npm run claude", () => {
     expect(originalClaudeState(fixture)).toEqual(before);
   });
 
+  it("실습 설정 폴더를 처음 만들 때만 회사 게이트웨이 안내를 보인다", () => {
+    fixture = prepared();
+    const hint = `회사 게이트웨이(ANTHROPIC_BASE_URL)를 쓴다면 ${path.join(fixture.practiceDir, "settings.json")}`;
+
+    const first = fixture.run({ script: "claude" });
+    expect(first.status, first.stderr).toBe(0);
+    expect(first.stdout).toContain(hint);
+
+    const second = fixture.run({ script: "claude" });
+    expect(second.status, second.stderr).toBe(0);
+    expect(second.stdout).not.toContain(hint);
+  });
+
   it("claude의 종료 코드로 끝난다", () => {
     fixture = prepared();
     fixture.env.FAKE_CLAUDE_EXIT = "7";

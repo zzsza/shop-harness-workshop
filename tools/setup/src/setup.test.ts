@@ -119,6 +119,7 @@ describe("npm run setup", () => {
       expect(result.stdout).toContain(line);
     }
     expect(result.stdout).toContain("npm run claude로 실습을 시작하세요");
+    expect(result.stdout).toContain("회사 게이트웨이(ANTHROPIC_BASE_URL)를 쓴다면 ~/.claude-workshop/settings.json");
     expect(fixture.claudeLog()).toEqual([{ args: ["--version"], configDir: null, cwd: fixture.repo }]);
     expect(fixture.npmLog()).toEqual([]);
     expect(readFileSync(path.join(fixture.repo, ".env"), "utf8")).toBe("API_PORT=4000\n");

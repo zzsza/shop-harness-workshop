@@ -7,7 +7,7 @@ import path from "node:path";
 import { spawnInteractive } from "./command.ts";
 import { claudeEnv, REPO_ROOT, resolvePracticeConfigDir } from "./paths.ts";
 import { runSteps, StepFailure, type Step } from "./report.ts";
-import { checkClaude, databasePath, relative } from "./setup.ts";
+import { checkClaude, databasePath, gatewayHint, relative } from "./setup.ts";
 
 const SCRIPT = "claude.mjs";
 export const TOTAL_STEPS = 4;
@@ -91,12 +91,15 @@ function launchClaude(claude: string, configDir: string, claudeArgs: readonly st
 export async function runClaude(argv: readonly string[]): Promise<number> {
   let claude = "";
   let configDir = "";
+  // 단계 콜백 안에서 바꾸므로, 상수로 좁혀지지 않게 객체에 담는다.
+  const practiceDir = { created: false };
   const steps: Step[] = [
     {
       name: "실습 설정 폴더 위치",
       run: () => {
         configDir = resolvePracticeConfigDir();
         const existed = existsSync(configDir);
+        practiceDir.created = !existed;
         mkdirSync(configDir, { recursive: true });
         return `통과 (${configDir}, ${existed ? "있음" : "새로 만듦"}, 원래 설정·레포와 겹치지 않음)`;
       },
@@ -112,5 +115,7 @@ export async function runClaude(argv: readonly string[]): Promise<number> {
     { name: "준비 확인", run: checkPrepared },
   ];
   if (!(await runSteps(SCRIPT, steps, 2, TOTAL_STEPS))) return 1;
+  // 실습 폴더를 처음 만든 때는 곧 로그인 화면이 나온다. setup의 안내를 놓친 게이트웨이 사용자를 위해 한 번 더 알린다.
+  if (practiceDir.created) for (const line of gatewayHint(path.join(configDir, "settings.json"))) console.log(`(${line})`);
   return launchClaude(claude, configDir, argv);
 }

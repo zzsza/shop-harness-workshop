@@ -79,6 +79,28 @@ Claude Code는 실습 전용 설정 폴더 `~/.claude-workshop`(Windows는 `C:\U
 
 `npm run orders:simulate`는 몇 초마다 새 주문을 만들고, `npm run db:reset`은 데이터를 처음 상태로 되돌립니다.
 
+#### 회사 게이트웨이를 쓰는 경우
+
+claude.ai 로그인 대신 회사 게이트웨이(`ANTHROPIC_BASE_URL`)로 Claude Code를 쓴다면, **처음 `npm run claude`를 하기 전에** 실습 설정 폴더의 `settings.json`에 게이트웨이 값을 넣습니다.
+실습 계정은 평소 `~/.claude` 설정을 읽지 않으므로, 평소 계정에 넣어 두었더라도 여기에 따로 넣어야 합니다.
+
+- 파일 위치: `~/.claude-workshop/settings.json`(Windows는 `C:\Users\<이름>\.claude-workshop\settings.json`). 폴더나 파일이 없으면 만듭니다.
+- 같은 폴더의 `workshop-settings.json`은 `npm run claude`가 띄울 때마다 다시 쓰므로 고치지 않습니다.
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://회사-게이트웨이-주소",
+    "ANTHROPIC_AUTH_TOKEN": "회사에서-발급받은-토큰"
+  }
+}
+```
+
+값을 넣지 않고 띄워 로그인 화면이 나왔다면, 종료하고 값을 넣은 뒤 다시 `npm run claude`를 실행하면 됩니다.
+`npm run claude:reset`은 이 폴더를 통째로 지우므로, 리셋한 뒤에는 다시 넣어야 합니다.
+Mac·Linux에서는 파일 대신 셸 환경 변수로 넘겨도 됩니다(`ANTHROPIC_BASE_URL=... ANTHROPIC_AUTH_TOKEN=... npm run claude`). `npm run claude`는 이 값을 그대로 claude에 넘깁니다.
+토큰은 레포 안 파일에 적거나 커밋하지 않습니다.
+
 ### GitHub에서 PR 실습하기
 
 Day1에 이미 clone했다면 Day2 시작 전에 `git fetch origin --tags --force`로 새로 옮긴 시작 태그(`start/day2-*`)를 받습니다. 그냥 `git fetch`는 이미 있는 태그를 바꾸지 않아 채점 기준점이 어긋납니다.
