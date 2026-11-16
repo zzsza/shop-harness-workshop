@@ -146,13 +146,18 @@ function checkFailure(plan: MergePlan, result: CheckResult): StepFailure {
   return refuse(`검사가 중간에 멈춰서(종료 코드 ${result.code}) ${branch} 브랜치를 합치지 않았습니다.`, [`다시 실행하세요: npm run merge ${branch}`]);
 }
 
-/** git merge --no-ff. 충돌하면 git merge --abort로 되돌리고 충돌한 파일과 할 일을 담아 멈춘다. */
+/** 검사한 커밋을 git merge --no-ff로 합친다. 그동안 지금 브랜치나 두 브랜치의 커밋이 바뀌었으면 멈춘다. 충돌하면 git merge --abort로 되돌리고 충돌한 파일과 할 일을 담아 멈춘다. */
 function mergeBranch(repo: string, plan: MergePlan): string {
   const { branch, current } = plan;
+  const now = run(repo, ["symbolic-ref", "--quiet", "--short", "HEAD"]).stdout.trim();
+  if (now !== current) {
+    throw refuse(`검사하는 동안 지금 브랜치가 ${current}에서 ${now === "" ? "브랜치가 아닌 커밋" : now}(으)로 바뀌었습니다. 합칠 곳이 달라 멈춥니다.`, [`${current} 브랜치로 돌아와(git switch ${current}) npm run merge ${branch}를 다시 실행하세요.`]);
+  }
   if (git(repo, ["rev-parse", `refs/heads/${branch}`]) !== plan.commit || git(repo, ["rev-parse", "HEAD"]) !== plan.head) {
     throw refuse(`검사하는 동안 ${branch}나 ${current}에 새 커밋이 생겼습니다. 검사한 것과 합칠 것이 달라 멈춥니다.`, [`다시 실행하세요: npm run merge ${branch}`]);
   }
-  const merged = run(repo, ["merge", "--no-ff", "--no-edit", branch]);
+  // 이름이 아니라 검사한 커밋을 합친다. 같은 이름의 태그가 있어도 검사한 브랜치 커밋만 들어간다. 메시지에는 브랜치 이름을 남긴다.
+  const merged = run(repo, ["merge", "--no-ff", "-m", `Merge branch '${branch}' into ${current}`, plan.commit]);
   if (merged.status === 0) return git(repo, ["rev-parse", "HEAD"]);
   const conflicted = lines(git(repo, ["-c", "core.quotepath=off", "diff", "--name-only", "--diff-filter=U"]));
   if (run(repo, ["rev-parse", "--verify", "--quiet", "MERGE_HEAD"]).status === 0) git(repo, ["merge", "--abort"]);

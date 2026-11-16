@@ -109,6 +109,36 @@ describe("npm run merge", () => {
     expect(printed()).toContain("feat/nope 브랜치가 없습니다.");
   });
 
+  it("<브랜치>와 같은 이름의 태그가 다른 커밋을 가리켜도 검사한 브랜치 커밋만 합친다", async () => {
+    const { repo, feature } = practiceRepo();
+    commitFile(repo, "other.txt", "unchecked\n", "unchecked");
+    git(repo, "tag", "feat/x");
+    git(repo, "reset", "-q", "--hard", "HEAD~1");
+    const check = fakeCheck({ code: 0, failed: null });
+    output();
+
+    expect(await runMerge(["feat/x"], { repo, runCheck: check.runCheck })).toBe(0);
+
+    expect(check.calls).toEqual([[repo, feature, "day2-a"]]);
+    expect(git(repo, "rev-parse", "HEAD^2")).toBe(feature);
+    expect(git(repo, "log", "-1", "--format=%s")).toBe("Merge branch 'feat/x' into day2-a");
+  });
+
+  it("검사하는 동안 다른 브랜치로 옮기면 어느 브랜치에도 합치지 않는다", async () => {
+    const { repo } = practiceRepo();
+    const before = git(repo, "rev-parse", "HEAD");
+    const printed = output();
+    const switchDuringCheck = (): Promise<CheckResult> => {
+      git(repo, "switch", "-q", "-c", "day2-b");
+      return Promise.resolve({ code: 0, failed: null });
+    };
+
+    expect(await runMerge(["feat/x"], { repo, runCheck: switchDuringCheck })).toBe(1);
+
+    expect(git(repo, "rev-parse", "day2-a", "day2-b")).toBe(`${before}\n${before}`);
+    expect(printed()).toContain("검사하는 동안 지금 브랜치가 day2-a에서 day2-b(으)로 바뀌었습니다.");
+  });
+
   it("합치다 충돌하면 git merge --abort로 합치기 전으로 되돌린다", async () => {
     const { repo } = practiceRepo();
     git(repo, "switch", "-q", "feat/x");
