@@ -79,6 +79,30 @@ describe("npm run sync", () => {
     expect(git(student, "rev-parse", "--abbrev-ref", "day1-b@{upstream}")).toBe("origin/day1-b");
   });
 
+  it("fork를 이어 강사 레포가 upstream이면 내 fork(origin)가 아니라 upstream에서 받아 맞춘다", async () => {
+    const { seed, student } = classroom();
+    const fork = path.join(path.dirname(student), "fork.git");
+    git(path.dirname(student), "clone", "-q", "--bare", path.join(path.dirname(student), "remote.git"), fork);
+    git(student, "remote", "rename", "origin", "upstream");
+    git(student, "remote", "add", "origin", fork);
+    git(student, "fetch", "-q", "origin");
+    git(student, "switch", "-q", "-c", "feat/x");
+    writeFileSync(path.join(student, "feat.txt"), "mine\n");
+    git(student, "add", "feat.txt");
+    git(student, "commit", "-q", "-m", "feature");
+    git(student, "push", "-q", "-u", "origin", "feat/x");
+    git(student, "switch", "-q", "day1-a");
+    writeFileSync(path.join(seed, "a.txt"), "v2\n");
+    git(seed, "commit", "-q", "-am", "instructor fix");
+    git(seed, "branch", "-f", "day1-a", "main");
+    git(seed, "push", "-q", "origin", "main", "day1-a");
+
+    expect(await runSync(["--yes"], { repo: student, resetDatabase: noDb })).toBe(0);
+    expect(read(path.join(student, "a.txt"))).toBe("v2\n");
+    expect(git(student, "rev-parse", "main")).toBe(git(student, "rev-parse", "upstream/main"));
+    expect(git(student, "rev-parse", "feat/x")).toBe(git(student, "rev-parse", "origin/feat/x"));
+  });
+
   it("원격에 없는 브랜치를 주면 아무것도 바꾸지 않고 멈춘다", async () => {
     const { student } = classroom();
     writeFileSync(path.join(student, "a.txt"), "keep me\n");

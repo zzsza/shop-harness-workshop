@@ -30,6 +30,8 @@ git fetch origin
 gh repo set-default <내 아이디>/shop-harness-workshop
 ```
 
+이렇게 이은 뒤에는 `npm run sync`가 내 fork가 아니라 `upstream`(원래 레포)에서 받아 실습 브랜치를 맞춥니다. 강사가 나중에 고친 것도 그대로 받습니다.
+
 `gh repo set-default`를 빠뜨리면 `gh pr create`가 원래 레포로 PR을 보냅니다.
 `gh repo set-default --view`가 `<내 아이디>/shop-harness-workshop`을 보이면 됩니다.
 

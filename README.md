@@ -59,7 +59,7 @@ Claude Code는 실습 전용 설정 폴더 `~/.claude-workshop`(Windows는 `C:\U
 `npm run claude -- --continue`처럼 `--` 뒤에 붙인 옵션은 claude에 그대로 넘어갑니다.
 그냥 `claude`로 열면 평소 계정과 설정으로 뜨니, 실습할 때는 꼭 `npm run claude`로 엽니다.
 실습 계정을 처음 상태로 돌리려면 `npm run claude:reset`을 실행합니다. 실습 계정만 로그아웃하고 `~/.claude-workshop`을 지운 뒤, 다음 `npm run claude`에서 로그인부터 다시 나옵니다.
-실습하다 꼬였거나 강사가 자료를 고쳤다고 하면 `npm run sync`를 실행합니다. 바뀐 파일과 내 커밋은 버리고 모든 실습 브랜치를 원격 최신으로 맞춘 뒤 DB도 처음 상태로 되돌립니다. 다른 브랜치로 바로 옮기려면 `npm run sync -- day1-c`처럼 브랜치를 붙입니다.
+실습하다 꼬였거나 강사가 자료를 고쳤다고 하면 `npm run sync`를 실행합니다. 바뀐 파일과 내 커밋은 버리고 모든 실습 브랜치를 강사 레포 최신으로 맞춘 뒤 DB도 처음 상태로 되돌립니다. fork를 이어 강사 레포가 `upstream`이면 `upstream`에서 받습니다. 다른 브랜치로 바로 옮기려면 `npm run sync -- day1-c`처럼 브랜치를 붙입니다.
 
 실습에 쓰는 두 가지가 함께 켜집니다.
 
