@@ -102,16 +102,17 @@ Mac·Linux에서는 파일 대신 셸 환경 변수로 넘겨도 됩니다(`ANTH
 토큰은 레포 안 파일에 적거나 커밋하지 않습니다.
 
 직접 파일을 고치기 번거로우면, 이미 쓰고 있는 Claude Code를 이 레포 폴더에서 열고 아래 프롬프트를 붙여 넣습니다.
+토큰은 대화에 붙여 넣지 않습니다. 대화 내용은 모델 서버로 가고 세션 기록에도 남기 때문입니다. Claude는 자리만 만들고, 토큰은 직접 파일에 붙여 넣습니다.
 
 ```text
-~/.claude-workshop/settings.json 에 회사 게이트웨이 설정을 넣어 줘.
+~/.claude-workshop/settings.json 에 회사 게이트웨이 설정 자리를 만들어 줘.
 
-1. 게이트웨이 주소(ANTHROPIC_BASE_URL)와 토큰(ANTHROPIC_AUTH_TOKEN)을 나한테 물어봐.
-2. 그 값을 ~/.claude-workshop/settings.json 의 "env"에 넣어. 폴더나 파일이 없으면 만들고,
-   이미 있으면 다른 키는 그대로 두고 env만 더해.
-3. 같은 폴더의 workshop-settings.json 은 건드리지 마.
-4. 토큰은 레포 안 파일에 쓰지 말고, 화면에도 전체를 보여 주지 마.
-5. 끝나면 "npm run claude를 다시 실행하세요"라고 알려 줘.
+1. 파일의 "env"에 아래 두 키를 넣어. 폴더나 파일이 없으면 만들고, 이미 있으면 다른 키는 그대로 두고 env만 더해.
+   "ANTHROPIC_BASE_URL": "https://회사-게이트웨이-주소"
+   "ANTHROPIC_AUTH_TOKEN": "여기에-토큰-붙여넣기"
+2. 같은 폴더의 workshop-settings.json 은 건드리지 마.
+3. 나한테 토큰을 묻지 말고, 내가 값을 넣은 뒤에도 이 파일을 다시 읽지 마.
+4. 끝나면 파일 전체 경로를 알려 주고, "에디터로 열어 두 값을 바꾼 뒤 npm run claude를 실행하세요"라고 안내해 줘.
 ```
 
 ### GitHub에서 PR 실습하기
