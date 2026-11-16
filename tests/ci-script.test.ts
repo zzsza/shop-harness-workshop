@@ -12,9 +12,11 @@ const cases: string[] = [];
 const strays: number[] = [];
 
 // verify 대역: 작업 공간 패키지(@fixture/pkg)의 값을 출력한다. HOLD가 있으면 자기 PID를 적고 멈추지 않고 기다린다.
+// --only 단계가 CI_FIXTURE_FAIL과 같으면 그 단계에서 실패한다.
 const verifyStub = `import { readFileSync, writeFileSync } from "node:fs";
 const seen = readFileSync("node_modules/@fixture/pkg/value.txt", "utf8").trim();
 console.log("seen=" + seen);
+if (process.argv[process.argv.indexOf("--only") + 1] === process.env.CI_FIXTURE_FAIL) process.exit(1);
 if (process.env.CI_FIXTURE_HOLD) {
   writeFileSync(process.env.CI_FIXTURE_HOLD, String(process.pid));
   setInterval(() => {}, 1000);
@@ -108,6 +110,21 @@ describe("npm run ci", { timeout: 30_000 }, () => {
     expect(code).toBe(0);
     expect(output).toContain("커밋하지 않은 변경 1개는 검사하지 않았어요(PR에도 안 올라가요): packages/pkg/value.txt");
     expect(readFileSync(path.join(fx.repo, "packages", "pkg", "value.txt"), "utf8")).toBe("uncommitted\n");
+    expect(leftovers(fx)).toEqual({ temp: [], worktrees: 1 });
+  });
+
+  it("--result를 주면 실패한 단계 키와 단계별 결과를 JSON으로 남기고 1로 끝난다", () => {
+    const fx = fixture();
+    const resultFile = path.join(path.dirname(fx.tmp), "result.json");
+
+    const { code, output } = ci(fx, ["--base", "HEAD", "--result", resultFile], ciEnv(fx.tmp, { CI_FIXTURE_FAIL: "test" }));
+
+    expect(code).toBe(1);
+    expect(output).toContain('[ci] 실패: "테스트" 단계');
+    const result = JSON.parse(readFileSync(resultFile, "utf8")) as { ok: boolean; failed: string; steps: { key: string; ok: boolean | null }[] };
+    expect(result.ok).toBe(false);
+    expect(result.failed).toBe("test");
+    expect(result.steps.map(({ key, ok }) => `${key}:${String(ok)}`)).toEqual(["checkout:true", "dependencies:true", "node:true", "typecheck:true", "lint:true", "test:false", "build:null", "grade:null"]);
     expect(leftovers(fx)).toEqual({ temp: [], worktrees: 1 });
   });
 

@@ -1,11 +1,13 @@
 // npm run ci: PR이 받을 검사를 "커밋한 것만" 가지고 돌린다.
-// 커밋 꺼내기 → 의존성 → verify(타입·lint·테스트·빌드) → 채점(기준점 이후 바뀐 것).
+// 커밋 꺼내기 → 의존성 → Node 확인 → 타입 검사 → lint → 테스트 → 빌드 → 채점(기준점 이후 바뀐 것).
+// Node 확인부터 빌드까지는 verify.mjs를 단계마다 따로 불러, 어느 단계에서 멈췄는지 표와 결과 파일에 남긴다.
 // 내 폴더에서는 커밋을 임시 폴더에 꺼내 돌리므로, 커밋하지 않은 파일은 검사에 들어가지 않는다.
 // GitHub Actions에서는 체크아웃 자체가 깨끗한 폴더라서 그 자리에서 돈다. 로컬과 CI가 같은 명령을 쓴다.
 //
 //   npm run ci                        HEAD를 검사, 기준점은 가장 가까운 start/* 태그
 //   npm run ci -- --base day2-b       기준점을 직접 정한다(브랜치·태그·커밋)
 //   npm run ci -- <커밋>              HEAD 대신 그 커밋을 검사
+//   npm run ci -- --result <파일>     끝나면 단계별 결과를 JSON으로 남긴다(npm run merge가 읽는다)
 // GitHub의 PR에서는 기준점이 그 PR의 base 브랜치(origin/<base>)다.
 // 종료 코드: 0 통과, 1 검사 실패, 2 검사를 돌릴 수 없음, 128+신호 번호 중간에 멈춤(Ctrl+C 130).
 import { spawn, spawnSync } from "node:child_process";
@@ -23,6 +25,7 @@ import {
   statSync,
   symlinkSync,
   unlinkSync,
+  writeFileSync,
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -50,22 +53,26 @@ function stop(message) {
 function parseArgs(argv) {
   let base = null;
   let commit = "HEAD";
+  let result = null;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--base") {
       base = argv[index + 1] ?? stop("--base 뒤에 기준이 될 브랜치나 커밋을 적으세요.");
       index += 1;
-    } else if (arg.startsWith("--")) stop(`알 수 없는 옵션 ${arg}. 쓸 수 있는 옵션: --base <ref>, <커밋>`);
+    } else if (arg === "--result") {
+      result = argv[index + 1] ?? stop("--result 뒤에 결과를 남길 파일 경로를 적으세요.");
+      index += 1;
+    } else if (arg.startsWith("--")) stop(`알 수 없는 옵션 ${arg}. 쓸 수 있는 옵션: --base <ref>, --result <파일>, <커밋>`);
     else commit = arg;
   }
-  return { base, commit };
+  return { base, commit, result };
 }
 
 function commitOf(ref) {
   return git(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).stdout;
 }
 
-const { base: baseArg, commit } = parseArgs(process.argv.slice(2));
+const { base: baseArg, commit, result: resultFile } = parseArgs(process.argv.slice(2));
 
 const sha = commitOf(commit) || stop(`${commit}라는 커밋이 없어요.`);
 const short = sha.slice(0, 7);
@@ -233,8 +240,10 @@ async function installDependencies() {
   return run([npmCli(), "ci", "--prefer-offline", "--no-audit", "--no-fund"], dir);
 }
 
+const verifyStep = (key, name) => ({ key, name, run: () => run([path.join("scripts", "verify.mjs"), "--only", key], dir) });
 const steps = [
   {
+    key: "checkout",
     name: inActions ? `체크아웃 확인 (${short})` : `커밋 꺼내기 (${short})`,
     run: () => {
       if (inActions) return 0;
@@ -246,9 +255,13 @@ const steps = [
       return added.status;
     },
   },
-  { name: "의존성", run: installDependencies },
-  { name: "verify (타입·lint·테스트·빌드)", run: () => run([path.join("scripts", "verify.mjs")], dir) },
-  { name: `채점 (${base} 이후 바뀐 것)`, run: () => run([path.join("tools", "grader", "src", "cli.ts"), "--since", base], dir) },
+  { key: "dependencies", name: "의존성", run: installDependencies },
+  verifyStep("node", "Node 확인"),
+  verifyStep("typecheck", "타입 검사"),
+  verifyStep("lint", "lint"),
+  verifyStep("test", "테스트"),
+  verifyStep("build", "빌드"),
+  { key: "grade", name: `채점 (${base} 이후 바뀐 것)`, run: () => run([path.join("tools", "grader", "src", "cli.ts"), "--since", base], dir) },
 ];
 
 function summary(results) {
@@ -256,7 +269,7 @@ function summary(results) {
   return lines.join("\n");
 }
 
-const results = steps.map(({ name }) => ({ name, ok: null }));
+const results = steps.map(({ key, name }) => ({ key, name, ok: null }));
 let failed = null;
 for (const [index, step] of steps.entries()) {
   console.log(`\n[ci ${index + 1}/${steps.length}] ${step.name}`);
@@ -264,7 +277,7 @@ for (const [index, step] of steps.entries()) {
   if (interrupted !== null) break;
   results[index].ok = code === 0;
   if (code !== 0) {
-    failed = step.name;
+    failed = step;
     break;
   }
 }
@@ -275,11 +288,14 @@ console.log(`\n${summary(results)}`);
 if (uncommitted.length > 0) {
   console.log(`\n[ci] 커밋하지 않은 변경 ${uncommitted.length}개는 검사하지 않았어요(PR에도 안 올라가요): ${uncommitted.slice(0, 5).join(", ")}${uncommitted.length > 5 ? " ..." : ""}`);
 }
+if (resultFile !== null) {
+  writeFileSync(resultFile, `${JSON.stringify({ commit: sha, base, ok: failed === null, failed: failed?.key ?? null, steps: results }, null, 2)}\n`);
+}
 if (process.env.GITHUB_STEP_SUMMARY) {
   appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## PR 검사 · ${short}\n\n${summary(results)}\n\n채점 기준점: \`${base}\`\n`);
 }
 if (failed !== null) {
-  console.error(`\n[ci] 실패: "${failed}" 단계`);
+  console.error(`\n[ci] 실패: "${failed.name}" 단계`);
   process.exit(1);
 }
 console.log(`\n[ci] 통과 · 커밋 ${short}`);

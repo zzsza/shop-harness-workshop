@@ -16,6 +16,7 @@
     "claude": "node scripts/claude.mjs",
     "claude:reset": "node scripts/claude-reset.mjs",
     "sync": "node scripts/sync.mjs",
+    "merge": "node scripts/merge.mjs",
     "verify": "node scripts/verify.mjs",
     "ci": "node scripts/ci.mjs",
     "dev": "node scripts/dev.mjs",
