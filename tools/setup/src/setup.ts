@@ -20,6 +20,17 @@ export const CLAUDE_INSTALL_HELP = [
 ];
 
 /**
+ * 회사 게이트웨이(ANTHROPIC_BASE_URL)를 쓰는 수강생에게 보이는 안내. 실습 계정은 처음 띄우면 claude.ai 로그인부터 나오므로,
+ * 게이트웨이 값은 첫 npm run claude 전에 실습 설정 폴더의 settings.json에 넣어야 로그인 없이 뜬다. 자세한 내용은 README.
+ */
+export function gatewayHint(settingsFile: string): string[] {
+  return [
+    `회사 게이트웨이(ANTHROPIC_BASE_URL)를 쓴다면 ${settingsFile}의 "env"에 게이트웨이 값을 넣은 뒤 npm run claude를 실행하세요.`,
+    "이미 띄웠다면 종료하고 값을 넣은 뒤 다시 실행하면 됩니다. 자세한 내용은 README의 \"회사 게이트웨이를 쓰는 경우\"를 보세요.",
+  ];
+}
+
+/**
  * 실습이 기대는 가장 낮은 Claude Code 버전. 2.1.69에서 InstructionsLoaded Hook이 생겼고, 뷰어의 지침 읽기 기록이 이 Hook에 기댄다.
  * 이보다 옛 버전은 이 Hook이 든 레포 .claude/settings.json을 통째로 버려 권한·Hook이 모두 빠지므로, 띄우기 전에 멈추고 업데이트를 안내한다.
  */
@@ -139,5 +150,6 @@ export async function runSetup(): Promise<number> {
   ];
   if (!(await runSteps(SCRIPT, steps, 2, TOTAL_STEPS))) return 1;
   console.log("\n준비가 끝났습니다. 이제 npm run claude로 실습을 시작하세요.");
+  for (const line of gatewayHint("~/.claude-workshop/settings.json(Windows는 C:\\Users\\<이름>\\.claude-workshop\\settings.json)")) console.log(`(${line})`);
   return 0;
 }
