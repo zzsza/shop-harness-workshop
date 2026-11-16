@@ -101,24 +101,17 @@ claude.ai 로그인 대신 회사 게이트웨이(`ANTHROPIC_BASE_URL`)로 Claud
 Mac·Linux에서는 파일 대신 셸 환경 변수로 넘겨도 됩니다(`ANTHROPIC_BASE_URL=... ANTHROPIC_AUTH_TOKEN=... npm run claude`). `npm run claude`는 이 값을 그대로 claude에 넘깁니다.
 토큰은 레포 안 파일에 적거나 커밋하지 않습니다.
 
-직접 파일을 고치기 번거로우면, 게이트웨이로 이미 잘 되는 **평소 `claude`**를 이 레포 폴더에서 열고 아래 프롬프트를 붙여 넣습니다. 실습 계정(`npm run claude`)은 게이트웨이 값이 없으면 로그인 화면에서 막히므로 평소 계정으로 합니다.
+직접 파일을 고치기 번거로우면, 이미 쓰고 있는 Claude Code를 이 레포 폴더에서 열고 아래 프롬프트를 붙여 넣습니다.
 
 ```text
-Grab Market 실습용 Claude Code(npm run claude)가 회사 게이트웨이로 뜨도록 설정해 줘.
+~/.claude-workshop/settings.json 에 회사 게이트웨이 설정을 넣어 줘.
 
-배경: npm run claude는 CLAUDE_CONFIG_DIR=~/.claude-workshop 으로 claude를 띄워서,
-평소 ~/.claude/settings.json 의 게이트웨이 설정이 적용되지 않아.
-
-할 일:
-1. 평소 설정에서 게이트웨이 값을 찾아. ~/.claude/settings.json 의 "env"에 있는
-   ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN(또는 ANTHROPIC_API_KEY), 그리고
-   다른 ANTHROPIC_* 값. 없으면 셸 환경 변수에서 찾고, 그래도 없으면 나한테 물어봐.
-2. ~/.claude-workshop/settings.json 에 그 값을 "env"로 넣어. 폴더나 파일이 없으면 만들고,
-   파일이 이미 있으면 다른 키(theme 등)는 그대로 두고 env만 합쳐.
-3. ~/.claude-workshop/workshop-settings.json 은 npm run claude가 매번 다시 쓰는 파일이니 건드리지 마.
-4. 토큰은 레포 안 어떤 파일에도 쓰지 말고, 화면에 출력할 때도 앞 4자리만 보이고 나머지는 가려.
-5. 끝나면 바뀐 파일 경로와 들어간 키 이름만 알려 주고,
-   "npm run claude를 다시 실행하세요"라고 안내해 줘.
+1. 게이트웨이 주소(ANTHROPIC_BASE_URL)와 토큰(ANTHROPIC_AUTH_TOKEN)을 나한테 물어봐.
+2. 그 값을 ~/.claude-workshop/settings.json 의 "env"에 넣어. 폴더나 파일이 없으면 만들고,
+   이미 있으면 다른 키는 그대로 두고 env만 더해.
+3. 같은 폴더의 workshop-settings.json 은 건드리지 마.
+4. 토큰은 레포 안 파일에 쓰지 말고, 화면에도 전체를 보여 주지 마.
+5. 끝나면 "npm run claude를 다시 실행하세요"라고 알려 줘.
 ```
 
 ### GitHub에서 PR 실습하기
