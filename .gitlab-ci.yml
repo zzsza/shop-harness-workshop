@@ -6,8 +6,13 @@ workflow:
     # 손으로 다시 돌릴 때(Build > Pipelines > Run pipeline). 기준점은 가장 가까운 시작 태그다.
     - if: $CI_PIPELINE_SOURCE == "web"
 
+# 폐쇄망에서 Runner가 Docker Hub에 닿지 않으면 이 파일은 그대로 두고
+# 프로젝트 Settings > CI/CD > Variables에 NODE_IMAGE(사내 미러의 node:24 주소)를 넣는다. 프로젝트 변수가 이 기본값보다 앞선다.
+variables:
+  NODE_IMAGE: node:24
+
 check:
-  image: node:24
+  image: $NODE_IMAGE
   timeout: 15 minutes
   # 같은 MR에 새 커밋이 오면 앞선 검사는 멈춘다(루프가 고쳐서 다시 올릴 때 줄을 서지 않게).
   interruptible: true
