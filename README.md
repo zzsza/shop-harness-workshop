@@ -121,6 +121,7 @@ Mac·Linux에서는 파일 대신 셸 환경 변수로 넘겨도 됩니다(`ANTH
 Day1에 이미 clone했다면 Day2 시작 전에 `git fetch origin --tags --force`로 새로 옮긴 시작 태그(`start/day2-*`)를 받습니다. 그냥 `git fetch`는 이미 있는 태그를 바꾸지 않아 채점 기준점이 어긋납니다.
 Day2부터는 내 fork에서 PR을 열고 PR마다 검사를 돌립니다.
 준비는 [docs/github.md](docs/github.md)를 따릅니다.
+회사 GitLab으로 실습하면 [docs/gitlab.md](docs/gitlab.md)를 따릅니다(PR 대신 MR).
 GitHub를 쓸 수 없으면 같은 검사를 `npm run ci`로 내 컴퓨터에서 돌립니다.
 
 ### 강의 뒤 정리

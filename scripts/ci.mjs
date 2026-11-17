@@ -2,13 +2,14 @@
 // 커밋 꺼내기 → 의존성 → Node 확인 → 타입 검사 → lint → 테스트 → 빌드 → 채점(기준점 이후 바뀐 것).
 // Node 확인부터 빌드까지는 verify.mjs를 단계마다 따로 불러, 어느 단계에서 멈췄는지 표와 결과 파일에 남긴다.
 // 내 폴더에서는 커밋을 임시 폴더에 꺼내 돌리므로, 커밋하지 않은 파일은 검사에 들어가지 않는다.
-// GitHub Actions에서는 체크아웃 자체가 깨끗한 폴더라서 그 자리에서 돈다. 로컬과 CI가 같은 명령을 쓴다.
+// GitHub Actions와 GitLab CI에서는 체크아웃 자체가 깨끗한 폴더라서 그 자리에서 돈다. 로컬과 CI가 같은 명령을 쓴다.
 //
 //   npm run ci                        HEAD를 검사, 기준점은 가장 가까운 start/* 태그
 //   npm run ci -- --base day2-b       기준점을 직접 정한다(브랜치·태그·커밋)
 //   npm run ci -- <커밋>              HEAD 대신 그 커밋을 검사
 //   npm run ci -- --result <파일>     끝나면 단계별 결과를 JSON으로 남긴다(npm run merge가 읽는다)
 // GitHub의 PR에서는 기준점이 그 PR의 base 브랜치(origin/<base>)다.
+// GitLab의 MR 파이프라인에서는 그 MR의 target 브랜치(origin/<target>)다.
 // 종료 코드: 0 통과, 1 검사 실패, 2 검사를 돌릴 수 없음, 128+신호 번호 중간에 멈춤(Ctrl+C 130).
 import { spawn, spawnSync } from "node:child_process";
 import {
@@ -31,7 +32,9 @@ import os from "node:os";
 import path from "node:path";
 
 const root = realpathSync.native(path.resolve(import.meta.dirname, ".."));
-const inActions = process.env.GITHUB_ACTIONS === "true";
+// GitLab은 GITLAB_CI=true를 주고, MR 파이프라인에서만 CI_MERGE_REQUEST_TARGET_BRANCH_NAME을 준다.
+const inGitLab = process.env.GITLAB_CI === "true";
+const inActions = process.env.GITHUB_ACTIONS === "true" || inGitLab;
 // 임시 폴더 이름에 이 실행의 PID를 넣는다. 다음 실행이 주인이 끝난 폴더만 골라 치울 수 있게.
 const TEMP_PREFIX = "shop-ci-";
 const TEMP_NAME = /^shop-ci-(\d+)-/;
@@ -80,6 +83,7 @@ const short = sha.slice(0, 7);
 function chooseBase() {
   if (baseArg !== null) return baseArg;
   if (process.env.GITHUB_BASE_REF) return `origin/${process.env.GITHUB_BASE_REF}`;
+  if (inGitLab && process.env.CI_MERGE_REQUEST_TARGET_BRANCH_NAME) return `origin/${process.env.CI_MERGE_REQUEST_TARGET_BRANCH_NAME}`;
   const tag = git(["describe", "--tags", "--match", "start/*", "--abbrev=0", sha]);
   if (tag.status === 0) return tag.stdout;
   return stop("채점 기준점을 찾지 못했어요. 실습 브랜치(day2-a 등)에서 딴 브랜치인지 확인하거나 --base <브랜치>로 정하세요.");
@@ -87,7 +91,7 @@ function chooseBase() {
 const base = chooseBase();
 if (!commitOf(base)) stop(`채점 기준점 ${base}를 이 저장소에서 찾지 못했어요. 브랜치 이름을 확인하거나 git fetch 뒤 다시 돌리세요.`);
 
-// 커밋하지 않은 변경. 검사에 들어가지 않는다는 것을 보여 주려고 센다(GitHub에는 없다).
+// 커밋하지 않은 변경. 검사에 들어가지 않는다는 것을 보여 주려고 센다(GitHub·GitLab에는 없다).
 const uncommitted = inActions
   ? []
   : git(["status", "--porcelain", "--untracked-files=all"]).stdout.split("\n").filter((line) => line !== "").map((line) => line.slice(3));

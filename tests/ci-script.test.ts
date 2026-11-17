@@ -67,9 +67,9 @@ function fixture(): Fixture {
 }
 
 function ciEnv(tmp: string, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
-  // GitHub Actions에서 테스트가 돌아도 ci.mjs는 내 폴더 경로로 돌아야 한다.
+  // GitHub Actions·GitLab CI에서 테스트가 돌아도 ci.mjs는 내 폴더 경로로 돌아야 한다.
   // Windows의 환경 변수 이름은 대소문자를 가리지 않는다.
-  const outside = new Set(["GITHUB_ACTIONS", "GITHUB_BASE_REF", "GITHUB_STEP_SUMMARY", "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"]);
+  const outside = new Set(["GITHUB_ACTIONS", "GITHUB_BASE_REF", "GITHUB_STEP_SUMMARY", "GITLAB_CI", "CI_MERGE_REQUEST_TARGET_BRANCH_NAME", "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"]);
   const inherited = Object.entries(process.env).filter(([key]) => !outside.has(key.toUpperCase()));
   return { ...Object.fromEntries(inherited), TMPDIR: tmp, TEMP: tmp, TMP: tmp, ...extra };
 }
@@ -125,6 +125,31 @@ describe("npm run ci", { timeout: 30_000 }, () => {
     expect(result.ok).toBe(false);
     expect(result.failed).toBe("test");
     expect(result.steps.map(({ key, ok }) => `${key}:${String(ok)}`)).toEqual(["checkout:true", "dependencies:true", "node:true", "typecheck:true", "lint:true", "test:false", "build:null", "grade:null"]);
+    expect(leftovers(fx)).toEqual({ temp: [], worktrees: 1 });
+  });
+
+  it("GitLab MR 파이프라인에서는 그 자리에서 돌고, 채점 기준점은 MR의 target 브랜치(origin/<target>)다", () => {
+    const fx = fixture();
+    git(fx.repo, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    const resultFile = path.join(path.dirname(fx.tmp), "result.json");
+
+    const { code, output } = ci(fx, ["--result", resultFile], ciEnv(fx.tmp, { GITLAB_CI: "true", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main" }));
+
+    expect(code).toBe(0);
+    expect(output).toContain("체크아웃 확인");
+    expect(output).toContain("채점 (origin/main 이후 바뀐 것)");
+    expect((JSON.parse(readFileSync(resultFile, "utf8")) as { base: string }).base).toBe("origin/main");
+    expect(leftovers(fx)).toEqual({ temp: [], worktrees: 1 });
+  });
+
+  it("GITLAB_CI가 없으면 CI_MERGE_REQUEST_TARGET_BRANCH_NAME을 보지 않는다(내 노트북 경로는 그대로)", () => {
+    const fx = fixture();
+    git(fx.repo, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
+
+    const { code, output } = ci(fx, [], ciEnv(fx.tmp, { CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main" }));
+
+    expect(code).toBe(2);
+    expect(output).toContain("채점 기준점을 찾지 못했어요");
     expect(leftovers(fx)).toEqual({ temp: [], worktrees: 1 });
   });
 

@@ -1,0 +1,21 @@
+# MR 검사: 회사 GitLab으로 가져온 레포에서 MR을 열면 돈다. 로컬의 npm run ci와 같은 명령이다.
+# GitHub의 .github/workflows/pr.yml과 짝이다(같은 Node 24, 같은 명령). 준비는 docs/gitlab.md에 있다.
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    # 손으로 다시 돌릴 때(Build > Pipelines > Run pipeline). 기준점은 가장 가까운 시작 태그다.
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+check:
+  image: node:24
+  timeout: 15 minutes
+  # 같은 MR에 새 커밋이 오면 앞선 검사는 멈춘다(루프가 고쳐서 다시 올릴 때 줄을 서지 않게).
+  interruptible: true
+  variables:
+    # 채점이 target 브랜치와 갈라진 곳을 찾으므로 기록 전체를 받는다.
+    GIT_DEPTH: "0"
+  script:
+    # MR 파이프라인은 target 브랜치를 받아 두지 않는다. 채점 기준점(origin/<target>)을 따로 받는다.
+    - if [ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ]; then git fetch --no-tags origin "+refs/heads/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME:refs/remotes/origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"; fi
+    - npm ci --no-audit --no-fund
+    - npm run ci
